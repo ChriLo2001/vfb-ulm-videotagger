@@ -1,0 +1,25 @@
+# Spieldaten, Auswertungen und Videos niemals hochladen
+*.json
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.mp4
+*.mov
+*.mts
+*.m4v
+*.avi
+*.mkv
+*.bat
+TEST_*
+~$*
+
+# Interne Arbeitsdateien
+AUFTRAG_*.md
+Referenz_*.py
+xlsx.full.min.js
+
+# System
+.DS_Store
+Thumbs.db
+desktop.ini
