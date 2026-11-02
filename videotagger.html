@@ -319,11 +319,14 @@
   .chainBox .shot { color: var(--warn); font-weight: 600; }
   .startBtn.active { background: #3fb6b0; border-color: #3fb6b0; color: #fff; }
   .startBtn.pre { border: 1px dashed #3fb6b0; color: #3fb6b0; }
-  #shotPanel {
+  #shotPanel, #oppPanel {
     display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
     padding: 10px; margin-bottom: 12px; border-radius: 6px;
     border: 1px solid var(--warn); background: #3a2d19;
   }
+  #oppPanel button { display: inline-flex; gap: 6px; align-items: center; }
+  #oppTools:empty { display: none; }
+  #oppTools .hint { align-self: center; }
 
   /* ----- Auswertung ----- */
   #statsView { overflow: auto; display: grid; gap: 12px; align-content: start; }
@@ -491,7 +494,7 @@
   body.ein #liveDrittel { font-size: 13px; }
   body.ein #lastAction { margin: 2px 0 7px; padding: 4px 8px; min-height: 0; font-size: 13px; }
   body.ein .chainBox { min-height: 34px; margin: 2px 0 7px; padding: 6px 10px; font-size: 15px; }
-  body.ein #shotPanel { padding: 6px; margin-bottom: 7px; }
+  body.ein #shotPanel, body.ein #oppPanel { padding: 6px; margin-bottom: 7px; gap: 4px; }
   /* Ereignisliste als Schublade von rechts (Standard: eingeklappt) */
   body.ein #eventPanel {
     position: fixed; top: 0; right: 0; bottom: 0; width: 440px; max-width: 92vw; z-index: 27;
@@ -586,10 +589,12 @@
 
     <div id="d1Panel">
       <div id="lastAction"></div>
+      <div id="oppPanel" hidden></div>
       <h2>Reihe aufs Feld</h2>
       <div class="btnGrid" id="lineButtons"></div>
       <h2>Ereignis erfassen</h2>
       <div class="btnGrid" id="actionButtons"></div>
+      <div class="btnGrid" id="oppTools"></div>
       <p class="hint">
         Klick auf einen Spieler: als Bullyspieler wählen (sonst Center der Reihe).
         Rechtsklick auf einen Spieler oder den Torwart: Einzelwechsel aus der Bank.
@@ -768,6 +773,11 @@ const SHOT_RESULTS = [
   { key: '3', code: 'geblockt', label: 'geblockt' },
   { key: '4', code: 'vorbei',   label: 'vorbei' },
 ];
+// Ergebnis eines Gegnerschusses (Durchgang 1, Schalter gegnerschussErgebnis). 'tor' wird nicht
+// gespeichert: der Gegnerschuss wird dann zum Gegentor (kein zweites Ereignis).
+const OPP_RESULTS = SHOT_RESULTS;
+const oppResultLabel = code => code === 'tor' ? 'Tor' : code ? codeLabel(SHOT_RESULTS, code) : 'unbekannt';
+const NACHTRAG_KEY = 'k'; // Durchgang 1: nächster Gegnerschuss ohne Ergebnis
 // Startcode-Vorauswahl: Bully aus Durchgang 1 in den letzten 3 s,
 // Gegnerschuss in den letzten 5 s.
 const PRESELECT_BULLY_S = 3;
@@ -806,6 +816,7 @@ const FEATURES = {
   kennzahlenExport:     'experiment', // Excel: Kennzahlen-Block, Reihenvergleich-Spalten, neue Blätter
   gegentorAlsSchuss:    'standard',   // Gegentor ohne Gegnerschuss ±3 s zählt als Gegnerschuss (HD-MA: kein Fall)
   plausiTorOhneBully:   'standard',   // Plausibilitätscheck „Tor ohne Bully in 3 min“ (nur Hinweis)
+  gegnerschussErgebnis: 'experiment', // nach X: Ergebnis (gehalten/geblockt/vorbei/Tor) und Blocker; Nachtragen (K); Blocks, Fenwick für beide Seiten
 };
 const modus = () => prefs.get('modus', 'standard');
 const feat = name => FEATURES[name] === 'standard' || modus() === 'experiment';
@@ -813,8 +824,9 @@ const BETA = ' β'; // Kennzeichen experimenteller Spalten, Zeilen und Flächen
 const expMark = name => FEATURES[name] === 'standard' ? '' : BETA;
 
 const BB_HINWEIS = 'Ballbesitzanteil = Anteil an Netto-Videozeit: Stillstand bei Ball im Aus nicht herausgerechnet; exakt erst mit Spieluhr.';
-const GEGNER_HINWEIS = 'Ergebnis der Gegnerschüsse nicht erfasst (alle Versuche inkl. geblockt/vorbei) – ' +
-  'für den Gegner daher kein Fenwick und kein „aufs Tor %“.';
+const gegnerHinweis = () => feat('gegnerschussErgebnis')
+  ? 'Ergebnis der Gegnerschüsse (gehalten/geblockt/vorbei), Blocks und Fenwick für beide Seiten: Übersicht → „Gegnerschüsse nach Reihe β“.'
+  : 'Ergebnis der Gegnerschüsse nicht erfasst (alle Versuche inkl. geblockt/vorbei) – für den Gegner daher kein Fenwick und kein „aufs Tor %“.';
 
 // ======================================================================
 // Hilfsfunktionen
@@ -1137,6 +1149,7 @@ function replaceEvents(list) {
 function undo() {
   const u = undoStack.pop();
   if (!u) { notice('Nichts mehr rückgängig zu machen.'); return; }
+  oppPick = null; // offene Ergebnisauswahl eines Gegnerschusses schließen
   if (u.op === 'chain') {
     chain = u.before;
     notice('Kettenschritt rückgängig.');
@@ -1297,7 +1310,9 @@ function describe(ev) {
     case 'einzelwechsel':
       return `${pl(ev.raus)} raus → ${pl(ev.rein)} rein`;
     case 'gegnerschuss':
-      return ev.reiheAufFeld ? `gegen ${lineLabel(ev.reiheAufFeld)}` : 'keine Reihe auf dem Feld';
+      return (ev.reiheAufFeld ? `gegen ${lineLabel(ev.reiheAufFeld)}` : 'keine Reihe auf dem Feld') +
+        (feat('gegnerschussErgebnis') && ev.ergebnis
+          ? ` · ${oppResultLabel(ev.ergebnis)}${ev.ergebnis === 'geblockt' ? ' · ' + (ev.blocker ? pl(ev.blocker) : 'Blocker ?') : ''}` : '');
     case 'tor':
     case 'gegentor':
       return (ev.schuetze ? `Schütze ${nr(ev.schuetze)}${ev.vorlage ? ', Vorlage ' + nr(ev.vorlage) : ''} · ` : '') +
@@ -1332,6 +1347,7 @@ function record(ev, flashText) {
   addEvent(ev);
   flash(flashText);
   $('lastAction').textContent = `${fmtTime(ev.time, true)} · ${TYPES[ev.typ].label} – ${describe(ev)}`;
+  return ev;
 }
 
 // Ein Wechsel übernimmt die Besetzung, die zur Videozeit gilt (auch nachträglich in früheren Dritteln).
@@ -1348,8 +1364,173 @@ function actLine(key, t) {
 
 function actShot(t) {
   const lu = lineupAt(t);
-  record({ typ: 'gegnerschuss', time: t, reiheAufFeld: lu.line }, 'Gegnerschuss');
+  const ev = record({ typ: 'gegnerschuss', time: t, reiheAufFeld: lu.line }, 'Gegnerschuss');
   if (!lu.line) notice('Gegnerschuss ohne Reihe auf dem Feld erfasst.', 'warn');
+  // Experiment: danach Ergebnis wählen (der Schuss ist schon gespeichert; Esc/Enter = unbekannt)
+  if (feat('gegnerschussErgebnis')) openOppPick(ev.id, false);
+}
+
+// ---------- Ergebnis und Blocker eines Gegnerschusses (Schalter gegnerschussErgebnis) ----------
+// oppPick: offene Auswahl { id, stage: 'ergebnis' | 'blocker', nachtragen }. Das Video läuft weiter;
+// Ziffern wirken nur hier (keine Reihenwechsel), ein Buchstabe schließt die Auswahl (unbekannt).
+let oppPick = null;
+
+// Gegnerschüsse ohne Ergebnis; ein Gegnerschuss mit Gegentor ±3 s gilt als Tor (nicht offen)
+function oppOffen() {
+  const all = oppAttempts().filter(x => x.ev.typ === 'gegnerschuss');
+  return { offen: all.filter(x => !x.tor && !x.ev.ergebnis).map(x => x.ev), gesamt: all.length };
+}
+
+function openOppPick(id, nachtragen) {
+  oppPick = { id, stage: 'ergebnis', nachtragen };
+  flash('Gegnerschuss: 1 Tor · 2 geh. · 3 gebl. · 4 vorbei');
+  renderOppPanel();
+}
+
+function closeOppPick() {
+  oppPick = null;
+  renderOppPanel();
+  renderChain();
+}
+
+const oppEvent = () => oppPick && events.find(e => e.id === oppPick.id && e.typ === 'gegnerschuss');
+
+function showOppLast(ev) {
+  $('lastAction').textContent = `${fmtTime(ev.time, true)} · ${TYPES[ev.typ].label} – ${describe(ev)}`;
+}
+
+function setOppResult(code) {
+  const ev = oppEvent();
+  if (!ev) { closeOppPick(); return; }
+  const nachtragen = oppPick.nachtragen;
+  if (code === 'tor') {
+    // Der Gegnerschuss wird zum Gegentor (wie H, mit Spielern auf dem Feld für Plus/Minus)
+    const upd = { id: ev.id, typ: 'gegentor', time: ev.time, aufDemFeld: onFieldIds(lineupAt(ev.time)) };
+    oppPick = null;
+    replaceEvent(upd);
+    showOppLast(upd);
+    flash('Gegentor');
+    if (nachtragen) nextOppOffen(ev.time);
+    return;
+  }
+  const upd = { ...ev, ergebnis: code };
+  if (code !== 'geblockt') delete upd.blocker;
+  replaceEvent(upd);
+  showOppLast(upd);
+  flash('Gegnerschuss: ' + oppResultLabel(code));
+  if (code === 'geblockt') { oppPick.stage = 'blocker'; renderOppPanel(); return; }
+  oppPick = null;
+  renderOppPanel();
+  if (nachtragen) nextOppOffen(ev.time);
+}
+
+function setOppBlocker(id) {
+  const ev = oppEvent();
+  const nachtragen = oppPick && oppPick.nachtragen;
+  oppPick = null;
+  if (ev && id) {
+    const upd = { ...ev, blocker: id };
+    replaceEvent(upd);
+    showOppLast(upd);
+    flash('Block: ' + nr(id));
+  }
+  renderOppPanel();
+  if (nachtragen && ev) nextOppOffen(ev.time);
+}
+
+// Feldspieler (ohne Torwart), die zum Zeitpunkt des Schusses auf dem Feld stehen, mit Positionstaste
+function oppBlockerOptions(ev) {
+  const lu = lineupAt(ev.time);
+  if (!lu.line) return [];
+  return formationFor(lu.line).pos.map(p => ({ taste: p.taste, label: p.label, id: (lu.slots.find(s => s.pos === p.id) || {}).id }))
+    .filter(o => o.id);
+}
+
+async function oppOtherBlocker() {
+  const wasPlaying = isPlaying();
+  pause();
+  focusControlWindow();
+  const v = await formDialog('Blocker (anderer Spieler)', [
+    { name: 'spieler', label: 'Spieler', type: 'select', options: [['', '– unbekannt –'], ...allPlayerOptions()], value: '' },
+  ], 'Übernehmen');
+  setOppBlocker(v && v.spieler ? v.spieler : null);
+  if (wasPlaying) play();
+}
+
+// Nachtragen: 3 s vor den nächsten Gegnerschuss ohne Ergebnis springen (ab Zeit t, am Ende von vorn)
+function nextOppOffen(t) {
+  const { offen } = oppOffen();
+  if (!offen.length) {
+    closeOppPick();
+    notice('Alle Gegnerschüsse haben ein Ergebnis.');
+    flash('Alle Gegnerschüsse erledigt');
+    return;
+  }
+  const ev = offen.find(e => e.time > t + 0.01) || offen[0];
+  seekTo(ev.time - 3);
+  if (state.file && !isPlaying()) play();
+  openOppPick(ev.id, true);
+}
+
+// Taste in Durchgang 1 bei offener Auswahl: Funktion(t) oder null; 'pass' = normal weiter
+function oppKey(key) {
+  if (!oppPick) return 'pass';
+  if (key === 'backspace') key = 'escape';
+  const nachtragen = oppPick.nachtragen;
+  if (oppPick.stage === 'ergebnis') {
+    const r = OPP_RESULTS.find(s => s.key === key);
+    if (r) return () => setOppResult(r.code);
+    if (key === 'enter') return () => { const ev = oppEvent(); oppPick = null; renderOppPanel(); if (nachtragen && ev) nextOppOffen(ev.time); };
+    if (key === 'escape') return () => closeOppPick();
+  } else {
+    if (key === '0') return () => oppOtherBlocker();
+    const ev = oppEvent();
+    const o = ev && oppBlockerOptions(ev).find(o => o.taste === key);
+    if (o) return () => setOppBlocker(o.id);
+    if (key === 'enter') return () => setOppBlocker(null);
+    if (key === 'escape') return () => { oppPick.nachtragen = false; setOppBlocker(null); };
+  }
+  if (/^[0-9]$/.test(key)) return () => {}; // andere Ziffern: keine Reihenwechsel
+  if (/^[a-zäöü]$/.test(key)) closeOppPick(); // Buchstabe: Ergebnis bleibt unbekannt, Taste wirkt normal
+  return 'pass';
+}
+
+const oppPromptText = () => !oppPick ? '' : oppPick.stage === 'ergebnis'
+  ? 'Gegnerschuss → 1 Tor · 2 gehalten · 3 geblockt · 4 vorbei · Enter unbekannt'
+  : 'Geblockt von? Positionstaste · 0 anderer · Enter unbekannt';
+
+function renderOppPanel() {
+  const panel = $('oppPanel'), tools = $('oppTools');
+  if (!panel) return;
+  const on = feat('gegnerschussErgebnis');
+  const ev = on && oppEvent();
+  if (oppPick && !ev) oppPick = null;
+  panel.hidden = !oppPick;
+  panel.textContent = '';
+  if (oppPick) {
+    const btn = (key, label, run) => h('button', { onclick: run }, h('kbd', null, key), label);
+    panel.append(h('strong', null, `Gegnerschuss ${fmtTime(ev.time, true)}${BETA}: `));
+    if (oppPick.stage === 'ergebnis') {
+      panel.append(...OPP_RESULTS.map(r => btn(r.key, r.code === 'tor' ? 'Tor (Gegentor)' : r.label, () => setOppResult(r.code))),
+        btn('Enter', 'unbekannt', () => oppKey('enter')()));
+    } else {
+      panel.append('geblockt von ', ...oppBlockerOptions(ev).map(o => btn(o.taste, `${o.label} ${nr(o.id)}`, () => setOppBlocker(o.id))),
+        btn('0', 'anderer …', () => oppOtherBlocker()), btn('Enter', 'unbekannt', () => setOppBlocker(null)));
+    }
+    const { offen, gesamt } = oppOffen();
+    panel.append(h('span', { class: 'hint' }, oppPick.nachtragen
+      ? `Nachtragen: noch ${offen.length} von ${gesamt} offen · Esc beendet`
+      : 'Esc = schließen (unbekannt) · Video läuft weiter'));
+  }
+  if (!tools) return;
+  tools.textContent = '';
+  if (on) {
+    const { offen, gesamt } = oppOffen();
+    tools.append(h('button', { title: 'Springt 3 s vor den nächsten Gegnerschuss ohne Ergebnis und öffnet die Auswahl',
+      onclick: () => capture(t => nextOppOffen(t)) }, h('kbd', null, NACHTRAG_KEY.toUpperCase()), `Nächster Gegnerschuss ohne Ergebnis${BETA}`),
+      h('span', { class: 'hint' }, gesamt ? `noch ${offen.length} von ${gesamt} offen` : 'noch keine Gegnerschüsse'));
+  }
+  overlayInfo.kette = session.durchgang === 2 ? chainText() : oppPromptText();
 }
 
 function actGoal(typ, t) {
@@ -1666,7 +1847,7 @@ function renderChain() {
     b.classList.toggle('pre', (chain.startVorauswahl || !chain.start) && b.dataset.code === start);
   }
   $('shotPanel').hidden = !chain.shotPending;
-  overlayInfo.kette = session.durchgang === 2 ? chainText() : '';
+  renderOppPanel(); // setzt auch overlayInfo.kette (Durchgang 2: Kette, Durchgang 1: offene Ergebnisauswahl)
 }
 
 // ======================================================================
@@ -1916,6 +2097,12 @@ async function editEvent(id) {
     case 'gegnerschuss':
       fields.push({ name: 'reiheAufFeld', label: 'Reihe auf dem Feld', type: 'select',
         options: [['', '– keine –'], ...LINES.map(l => [l.key, l.label])], value: ev.reiheAufFeld || '' });
+      if (feat('gegnerschussErgebnis')) fields.push(
+        { name: 'ergebnis', label: 'Ergebnis' + BETA, type: 'select', value: ev.ergebnis || '',
+          options: [['', 'unbekannt'], ['gehalten', 'gehalten'], ['geblockt', 'geblockt'], ['vorbei', 'vorbei (inkl. Pfosten/Latte)'],
+            ['tor', 'Tor – wird zum Gegentor']] },
+        { name: 'blocker', label: 'Blocker' + BETA, type: 'select', when: v => v.ergebnis === 'geblockt',
+          options: [['', '– unbekannt –'], ...allPlayerOptions()], value: ev.blocker || '' });
       break;
     case 'tor':
     case 'gegentor': {
@@ -2002,7 +2189,18 @@ async function editEvent(id) {
       }
       break;
     case 'einzelwechsel': upd.raus = v.raus || null; upd.rein = v.rein; break;
-    case 'gegnerschuss': upd.reiheAufFeld = v.reiheAufFeld || null; break;
+    case 'gegnerschuss':
+      upd.reiheAufFeld = v.reiheAufFeld || null;
+      if (feat('gegnerschussErgebnis')) {
+        if (v.ergebnis === 'tor') {
+          // wird zum Gegentor (ein Ereignis, wie bei Taste 1 nach X)
+          replaceEvent({ id: ev.id, typ: 'gegentor', time: upd.time, aufDemFeld: onFieldIds(lineupAt(upd.time)) });
+          return;
+        }
+        if (v.ergebnis) upd.ergebnis = v.ergebnis; else delete upd.ergebnis;
+        if (v.ergebnis === 'geblockt' && v.blocker) upd.blocker = v.blocker; else delete upd.blocker;
+      }
+      break;
     case 'tor':
     case 'gegentor':
       upd.aufDemFeld = v.aufDemFeld;
@@ -2589,8 +2787,18 @@ function handleKey(e) {
 
   if (session.view === 'erfassung') {
     const key = e.key.toLowerCase();
+    // Durchgang 1 mit offener Ergebnisauswahl eines Gegnerschusses: Ziffern/Enter/Esc wirken nur dort
+    if (session.durchgang === 1 && oppPick) {
+      const r = oppKey(key);
+      if (r !== 'pass') {
+        e.preventDefault();
+        if (!e.repeat) r();
+        return;
+      }
+    }
+    const nachtrag = session.durchgang === 1 && key === NACHTRAG_KEY && feat('gegnerschussErgebnis') ? t => nextOppOffen(t) : null;
     const run = key === 'o' ? actPause // Unterbrechung: in beiden Durchgängen
-      : session.durchgang === 2 ? d2Action(key) : D1_KEYS[key];
+      : nachtrag || (session.durchgang === 2 ? d2Action(key) : D1_KEYS[key]);
     if (run) {
       e.preventDefault();
       if (!e.repeat) { closeBench(); capture(run); }
@@ -3310,6 +3518,7 @@ function setDurchgang(n) {
   $('btnD2').classList.toggle('active', n === 2);
   $('d1Panel').hidden = n !== 1;
   $('d2Panel').hidden = n !== 2;
+  oppPick = null; // offene Ergebnisauswahl (Durchgang 1) schließen
   closeBench();
   saveSession();
   refreshLive(true);
@@ -3907,6 +4116,7 @@ function computeKennzahlen(st, range, fl) {
   }
   team.merges = phasesIn.reduce((s, ph) => s + ph.chains.length - 1, 0);
 
+  const gegnerschuesse = computeGegnerschuesse(range, shotsF, shotsA);
   const umschalten = computeUmschalten(range, oiv, shotsF, shotsA);
   const schichten = computeSchichtverlauf(range, fl, shotsF, shotsA);
   const bullyWert = computeBullyWert(range, oiv, shotsF, shotsA);
@@ -3933,8 +4143,72 @@ function computeKennzahlen(st, range, fl) {
       konter: ko.n || 0, pressN: gp2.n || 0, pressOk: gp2.ok || 0,
       schichtCa10: sv ? sv.phasen.map(x => perTen(x.ca, x.zeit)) : null });
   }
+  // Ergebnis der Gegnerschüsse (Schalter gegnerschussErgebnis): Reihen, Blocks, On-Field, Torhüter
+  for (const [key, g] of Object.entries(gegnerschuesse.L)) {
+    const l = st.lines[key] || (st.lines[key] = emptyLineStats(key));
+    Object.assign(l, { gsTor: g.tor, gsGehalten: g.gehalten, gsGeblockt: g.geblockt, gsVorbei: g.vorbei, gsUnbekannt: g.unbekannt,
+      ff: g.ff, fa: g.fa, gsEreignisse: g.ereignisse });
+  }
+  for (const [id, g] of Object.entries(gegnerschuesse.P)) {
+    const p = st.players[id] || (st.players[id] = emptyPlayerStats(id));
+    const tw = (findPlayer(id) || {}).position === 'TW';
+    Object.assign(p, { blocks: g.blocks, gsAufsTorOn: tw ? null : g.aufsTorOn, faOn: tw ? null : g.faOn,
+      paraden: tw ? g.paraden : null, gegentoreTW: tw ? g.gegentore : null,
+      fangquote: tw && g.paraden + g.gegentore ? g.paraden / (g.paraden + g.gegentore) : null, gsEreignisse: g.ereignisse });
+  }
   return { faktoren: fl.pf, team, P, L, phasen: phasesIn, merges, allMerges: merges, umschalten, schichten, bullyWert,
-    spielstand, duos, ueberzahl, rollen };
+    spielstand, duos, ueberzahl, rollen, gegnerschuesse };
+}
+
+// Ergebnis eines gegnerischen Schussversuchs: Gegentor (auch Gegnerschuss mit Gegentor ±3 s) = 'tor',
+// sonst das erfasste Ergebnis oder 'unbekannt'
+const oppErg = x => x.tor ? 'tor' : (x.ev.ergebnis || 'unbekannt');
+
+// Gegnerschüsse nach Ergebnis je Reihe (Reihe wie bei „Gegnerschüsse“ im Reihenvergleich), Blocks je Spieler,
+// On-Field (5 gegen 5) aufs Tor und Fenwick gegen, Torhüter (Paraden, Gegentore). Fenwick = ohne geblockte.
+function computeGegnerschuesse(range, shotsF, shotsA) {
+  const inRange = t => !range || (t >= range.t0 && t <= range.t1);
+  const L = {}, P = {};
+  const team = { tor: 0, gehalten: 0, geblockt: 0, vorbei: 0, unbekannt: 0, ff: 0, fa: 0, ereignisse: [] };
+  const gl = k => L[k] || (L[k] = { tor: 0, gehalten: 0, geblockt: 0, vorbei: 0, unbekannt: 0, ff: 0, fa: 0, ereignisse: [] });
+  const gp = id => P[id] || (P[id] = { blocks: 0, aufsTorOn: 0, faOn: 0, paraden: 0, gegentore: 0, ereignisse: [] });
+  for (const x of shotsA) {
+    if (!inRange(x.time)) continue;
+    const erg = oppErg(x);
+    const key = x.ev.typ === 'gegnerschuss' ? (x.ev.reiheAufFeld || '_') : (lineAt(x.time) || '_');
+    const item = { x, erg };
+    for (const o of [team, gl(key)]) { o[erg]++; if (erg !== 'geblockt') o.fa++; o.ereignisse.push(item); }
+    if (erg === 'geblockt' && x.ev.blocker) { const b = gp(x.ev.blocker); b.blocks++; b.ereignisse.push({ ...item, block: true }); }
+    const lu = lineupAt(x.time);
+    if (sitOf(lu.line) === 'gleich') {
+      for (const id of lu.slots.map(s => s.id).filter(Boolean)) {
+        const p = gp(id);
+        if (erg === 'tor' || erg === 'gehalten') p.aufsTorOn++;
+        if (erg !== 'geblockt') p.faOn++;
+        p.ereignisse.push(item);
+      }
+    }
+    if (lu.torwart && !lu.ohneTorwart) {
+      const g = gp(lu.torwart);
+      if (erg === 'gehalten') g.paraden++;
+      if (erg === 'tor') g.gegentore++;
+      if (erg === 'gehalten' || erg === 'tor') g.ereignisse.push({ ...item, tw: true });
+    }
+  }
+  for (const x of shotsF) {
+    if (!inRange(x.time) || x.erg === 'geblockt') continue;
+    team.ff++; gl(lineAt(x.time) || '_').ff++;
+  }
+  return { team, L, P };
+}
+
+// Plausibilität der Gegnerschuss-Ergebnisse (ganzes Spiel)
+function oppChecks() {
+  const gs = events.filter(e => e.typ === 'gegnerschuss');
+  const { offen, gesamt } = oppOffen();
+  const ohneBlocker = gs.filter(e => e.ergebnis === 'geblockt' && !e.blocker);
+  const nichtAufFeld = gs.filter(e => e.ergebnis === 'geblockt' && e.blocker && !onFieldIds(lineupAt(e.time)).includes(e.blocker));
+  return { offen, gesamt, ohneBlocker, nichtAufFeld };
 }
 
 // Spielstand aus Ulmer Sicht zur Zeit t; ein Tor zählt noch zum Spielstand davor
@@ -4224,6 +4498,13 @@ const PLAYER_COLS = [
   { head: 'Ballbesitz-anteil', key: 'bbAnteil', pct: true, exp: 'erweiterteKennzahlen', n: r => r.bbN,
     title: 'Anteil an Netto-Videozeit, während er auf dem Feld steht (n = Ketten). Stillstand bei Ball im Aus nicht herausgerechnet; exakt erst mit Spieluhr.' },
   { head: 'Konter verursacht', key: 'konterVerursacht', exp: 'erweiterteKennzahlen', title: `Eigene Fehlpässe/Ballverluste, nach denen ≤ ${KZ.KONTER_S} s ein Gegnerschuss/Gegentor folgte` },
+  { head: 'Blocks', key: 'blocks', exp: 'gegnerschussErgebnis', title: 'Geblockte Gegnerschüsse mit ihm als Blocker (alle Situationen)' },
+  { head: 'Blocks / 10', key: 'blocks10', dec1: true, exp: 'gegnerschussErgebnis', fn: r => r.blocks ? per10(r.blocks, r.spielzeit) : null,
+    title: 'Blocks pro 10 min geschätzter Spielzeit' },
+  { head: 'Gegner aufs Tor (Feld)', key: 'gsAufsTorOn', exp: 'gegnerschussErgebnis',
+    title: 'Gegnerschüsse aufs Tor (gehalten + Gegentore), während er auf dem Feld steht (5 gegen 5)' },
+  { head: 'FA (Feld)', key: 'faOn', exp: 'gegnerschussErgebnis',
+    title: 'Fenwick gegen: Gegnerschüsse ohne geblockte (inkl. Gegentore und unbekannte), während er auf dem Feld steht (5 gegen 5)' },
 ];
 
 // Spalten, deren Schalter aktiv ist; Kopf und Hinweis dürfen vom Modus abhängen (Funktion)
@@ -4260,7 +4541,7 @@ function lineRows(st, keys) {
   }
   const total = { ...emptyLineStats('gesamt'), label: 'Gesamt' };
   for (const r of rows) for (const k of ['eiszeit', 'spielzeit', 'schuesse', 'gegnerschuesse', 'tore', 'gegentore', 'cf', 'ca', 'bbZeit', 'bbGesch',
-    'konter', 'pressN', 'pressOk']) total[k] += r[k] || 0;
+    'konter', 'pressN', 'pressOk', 'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa']) total[k] = (total[k] || 0) + (r[k] || 0);
   total.laengstePhase = Math.max(0, ...rows.map(r => r.laengstePhase || 0));
   total.bbN = st.kz ? st.kz.team.bbN || 0 : 0; // Ketten des Teams (eine Kette kann über einen Wechsel gehen)
   return { rows, total };
@@ -4372,6 +4653,19 @@ function plausibility(st) {
   if (ohneBully.length) out.push({ ok: false, text: `${ohneBully.length} Tor(e)/Gegentor(e) ohne Bully innerhalb von 3 min` +
     (feat('autoTorPause') ? ' (Zeit bis zum Anspiel wird dann nicht als Stillstand abgezogen):' : ':'),
     jumps: ohneBully.map(e => ({ t0: e.time, t1: e.time })) });
+
+  // Ergebnis der Gegnerschüsse (Experiment)
+  if (feat('gegnerschussErgebnis')) {
+    const c = oppChecks();
+    out.push(c.offen.length
+      ? { ok: false, text: `${c.offen.length} von ${c.gesamt} Gegnerschüssen ohne Ergebnis${BETA} (Nachtragen: Taste K in Durchgang 1) – erster:`,
+          jumps: [{ t0: c.offen[0].time, t1: c.offen[0].time }] }
+      : { ok: true, text: `Alle ${c.gesamt} Gegnerschüsse haben ein Ergebnis${BETA}.` });
+    if (c.ohneBlocker.length) out.push({ ok: false, text: `${c.ohneBlocker.length} geblockte(r) Gegnerschuss/-schüsse ohne Blocker${BETA}:`,
+      jumps: c.ohneBlocker.map(e => ({ t0: e.time, t1: e.time })) });
+    if (c.nichtAufFeld.length) out.push({ ok: false, text: `${c.nichtAufFeld.length} Block(s), bei denen der Blocker laut Wechseln nicht auf dem Feld stand${BETA}:`,
+      jumps: c.nichtAufFeld.map(e => ({ t0: e.time, t1: e.time })) });
+  }
 
   // Prüfliste Ballbesitz: lange Lücken zwischen zwei Kontakten
   const luecken = feat('erweiterteKennzahlen') ? kontaktLuecken() : null;
@@ -4507,6 +4801,13 @@ function renderStats() {
     panel('Plausibilitätschecks (ganzes Spiel)', renderChecks(plausibility(all))),
     panel(`Spieler – ${pLabel2}`, h('div', { class: 'tableWrap' }, renderPlayerTable(st))),
     panel(`Reihenvergleich – ${pLabel2}`, h('div', { class: 'tableWrap' }, renderLineTable(st))),
+    ...(feat('gegnerschussErgebnis') ? [
+      panel(`Gegnerschüsse nach Reihe${expMark('gegnerschussErgebnis')} – ${pLabel2}`, h('div', null,
+        h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Gehalten = aufs Tor, Torwart hält (auch abgefälscht) · geblockt = von einem Ulmer Feldspieler ' +
+          'aufgehalten · vorbei inkl. Pfosten/Latte · Gegentore zählen als aufs Tor. Quoten nur über Schüsse mit bekanntem Ergebnis.'),
+        h('div', { class: 'tableWrap' }, renderOppLineTable(st)))),
+      panel(`Torhüter${expMark('gegnerschussErgebnis')} – ${pLabel2}`, h('div', { class: 'tableWrap' }, renderGoalieTable(st))),
+    ] : []),
     panel(`Passmatrix – ${pLabel2} (Zeilen = Passgeber, Spalten = Empfänger)`,
       h('div', null,
         h('div', { class: 'statsBar', style: 'margin-bottom:8px' }, 'Reihe auf dem Feld: ',
@@ -4715,7 +5016,14 @@ const goalsWhere = (range, pred) => events.filter(e => (e.typ === 'tor' || e.typ
 function playerEvidence(st, id, key) {
   const r = st.range;
   const x = st.kz.P[id];
+  const gsList = ((st.players[id] || {}).gsEreignisse || []);
   switch (key) {
+    case 'blocks': case 'blocks10': return gsList.filter(e => e.block).map(e => ({ x: e.x }));
+    case 'gsAufsTorOn': return gsList.filter(e => !e.block && !e.tw && (e.erg === 'tor' || e.erg === 'gehalten')).map(e => ({ x: e.x }));
+    case 'faOn': return gsList.filter(e => !e.block && !e.tw && e.erg !== 'geblockt').map(e => ({ x: e.x }));
+    case 'paraden': return gsList.filter(e => e.tw && e.erg === 'gehalten').map(e => ({ x: e.x }));
+    case 'gegentoreTW': return gsList.filter(e => e.tw && e.erg === 'tor').map(e => ({ x: e.x }));
+    case 'fangquote': return gsList.filter(e => e.tw).map(e => ({ x: e.x }));
     case 'eiszeit': case 'spielzeit': case 'einsaetze': case 'proEinsatz': case 'reihe':
       return segSpans(st, s => s.ids.includes(id), 'auf dem Feld');
     case 'ballgewinne':
@@ -5175,7 +5483,7 @@ function renderKzCorsi(st, out, sitParam) {
   return h('div', null,
     h('div', { class: 'statsBar', style: 'margin-bottom:8px' }, 'Situation: ', sitSeg),
     h('p', { class: 'hint' }, 'CF = eigene Schüsse (alle Ergebnisse), CA = Gegnerschüsse + Gegentore (ein Gegentor nicht doppelt, ' +
-      'wenn ±3 s ein Gegnerschuss erfasst ist); gezählt für alle Feldspieler, die beim Schuss auf dem Feld stehen. ' + GEGNER_HINWEIS),
+      'wenn ±3 s ein Gegnerschuss erfasst ist); gezählt für alle Feldspieler, die beim Schuss auf dem Feld stehen. ' + gegnerHinweis()),
     h('h3', null, 'Reihen'),
     lines.length ? h('div', { class: 'tableWrap' }, statsTable(lineCols, lines, { total, clip })) : h('p', { class: 'placeholder' }, 'Keine Daten in dieser Situation.'),
     h('h3', { style: 'margin-top:14px' }, 'Feldspieler'),
@@ -5283,6 +5591,62 @@ function renderLineTable(st) {
   const { rows, total } = lineRows(st);
   if (!rows.length) return h('p', { class: 'placeholder' }, 'Noch keine Wechsel erfasst.');
   return statsTable(LINE_COLS, rows, { total, clip: (r, c) => lineEvidence(st, r.key === 'gesamt' ? null : r.key, c.key) });
+}
+
+// Gegnerschüsse nach Ergebnis je Reihe (Schalter gegnerschussErgebnis); Quoten nur über bekannte Ergebnisse
+const gsBekannt = r => (r.gsTor || 0) + (r.gsGehalten || 0) + (r.gsGeblockt || 0) + (r.gsVorbei || 0);
+const OPP_LINE_COLS = [
+  { head: 'Reihe', key: 'label', text: true },
+  { head: 'Gegner-schüsse', key: 'gegnerschuesse', title: 'alle Gegnerschüsse inkl. Gegentore (wie im Reihenvergleich)' },
+  { head: 'aufs Tor', key: 'gsAufsTor', fn: r => (r.gsTor || 0) + (r.gsGehalten || 0), title: 'gehalten + Gegentore' },
+  { head: 'geblockt', key: 'gsGeblockt', fn: r => r.gsGeblockt || 0 },
+  { head: 'vorbei', key: 'gsVorbei', fn: r => r.gsVorbei || 0, title: 'inkl. Pfosten/Latte' },
+  { head: 'unbekannt', key: 'gsUnbekannt', fn: r => r.gsUnbekannt || 0 },
+  { head: 'aufs Tor / 10', key: 'gsAufsTor10', dec1: true, fn: r => per10((r.gsTor || 0) + (r.gsGehalten || 0), r.spielzeit) },
+  { head: 'geblockt / 10', key: 'gsGeblockt10', dec1: true, fn: r => per10(r.gsGeblockt || 0, r.spielzeit) },
+  { head: 'vorbei / 10', key: 'gsVorbei10', dec1: true, fn: r => per10(r.gsVorbei || 0, r.spielzeit) },
+  { head: 'Anteil aufs Tor', key: 'gsAnteil', pct: true, n: gsBekannt,
+    fn: r => gsBekannt(r) ? ((r.gsTor || 0) + (r.gsGehalten || 0)) / gsBekannt(r) : null, title: 'aufs Tor ÷ Gegnerschüsse mit bekanntem Ergebnis' },
+  { head: 'Block-quote', key: 'gsBlockquote', pct: true, n: gsBekannt,
+    fn: r => gsBekannt(r) ? (r.gsGeblockt || 0) / gsBekannt(r) : null, title: 'geblockt ÷ Gegnerschüsse mit bekanntem Ergebnis' },
+  { head: 'FF', key: 'ff', fn: r => r.ff || 0, title: 'Fenwick für: eigene Schüsse ohne geblockte' },
+  { head: 'FA', key: 'fa', fn: r => r.fa || 0, title: 'Fenwick gegen: Gegnerschüsse ohne geblockte (inkl. Gegentore und unbekannte)' },
+  { head: 'FF %', key: 'ffPct', pct: true, n: r => (r.ff || 0) + (r.fa || 0), fn: r => pctOf(r.ff || 0, r.fa || 0) },
+];
+
+function oppLineClip(r, c) {
+  const list = r.gsEreignisse || [];
+  const pick = f => list.filter(f).map(e => ({ x: e.x }));
+  switch (c.key) {
+    case 'gsAufsTor': case 'gsAufsTor10': return pick(e => e.erg === 'tor' || e.erg === 'gehalten');
+    case 'gsGeblockt': case 'gsGeblockt10': case 'gsBlockquote': return pick(e => e.erg === 'geblockt');
+    case 'gsVorbei': case 'gsVorbei10': return pick(e => e.erg === 'vorbei');
+    case 'gsUnbekannt': return pick(e => e.erg === 'unbekannt');
+    case 'fa': return pick(e => e.erg !== 'geblockt');
+    case 'ff': case 'ffPct': return ownShots().filter(x => inR(r.range, x.time) && x.erg !== 'geblockt' &&
+      (r.key == null || r.key === 'gesamt' || (lineAt(x.time) || '_') === r.key)).map(x => ({ x }));
+    default: return pick(() => true);
+  }
+}
+
+function renderOppLineTable(st) {
+  const { rows, total } = lineRows(st);
+  for (const r of [...rows, total]) r.range = st.range;
+  total.gsEreignisse = rows.flatMap(r => r.gsEreignisse || []);
+  if (!rows.length) return h('p', { class: 'placeholder' }, 'Noch keine Wechsel erfasst.');
+  return statsTable(OPP_LINE_COLS, rows, { total, clip: oppLineClip });
+}
+
+function renderGoalieTable(st) {
+  const rows = goalies().filter(p => st.players[p.id] && st.players[p.id].paraden != null)
+    .map(p => ({ id: p.id, ...nameRow(p.id), ...st.players[p.id] }));
+  if (!rows.length) return h('p', { class: 'placeholder' }, 'Keine Torhüter-Daten im gewählten Zeitraum.');
+  return statsTable([
+    { head: 'Nr', key: 'nummer', text: true }, { head: 'Name', key: 'name', text: true },
+    { head: 'Paraden', key: 'paraden', title: 'Gegnerschüsse mit Ergebnis gehalten, während er im Tor stand' },
+    { head: 'Gegentore', key: 'gegentoreTW' },
+    { head: 'Fangquote', key: 'fangquote', pct: true, n: r => (r.paraden || 0) + (r.gegentoreTW || 0), title: 'Paraden ÷ (Paraden + Gegentore)' },
+  ], rows, { clip: (r, c) => playerEvidence(st, r.id, c.key) });
 }
 
 function renderMatrix(st) {
@@ -5536,6 +5900,12 @@ const XL_STAT_ROWS = [
   [null, 'Ballbesitzanteil (Netto-Video)', 'KZ', 'pct', 'bbAnteil'],
   [null, 'n Ballbesitzketten', 'KZ', 'num', 'bbN', 'stichprobeN'],
   [null, 'Konter verursacht', 'KZ', 'val', 'konterVerursacht'],
+  [null, 'Blocks', 'KZ', 'val', 'blocks', 'gegnerschussErgebnis'],
+  [null, 'Blocks /10′', 'KZ', 'rate10', 'blocks', 'gegnerschussErgebnis'],
+  [null, 'Gegner aufs Tor (Feld)', 'KZ', 'num', 'gsAufsTorOn', 'gegnerschussErgebnis'],
+  [null, 'Fenwick gegen (Feld)', 'KZ', 'num', 'faOn', 'gegnerschussErgebnis'],
+  [null, 'Paraden (TW)', 'KZ', 'num', 'paraden', 'gegnerschussErgebnis'],
+  [null, 'Fangquote (TW)', 'KZ', 'pctTw', 'fangquote', 'gegnerschussErgebnis'],
 ];
 
 // Zeilen des Statistik-Blatts im aktuellen Modus (Kennzahlen-Block mit β)
@@ -5593,7 +5963,8 @@ function buildStatSheet(wb, title, st, groups, shifts) {
       let v;
       if (kind === 'time') v = (p[field] || 0) / SEC_PER_DAY;
       else if (kind === 'val' || kind === 'pm') v = p[field] || 0;
-      else if (kind === 'num' || kind === 'pct') v = p[field] == null ? '' : p[field];
+      else if (kind === 'num' || kind === 'pct' || kind === 'pctTw') v = p[field] == null ? '' : p[field];
+      else if (kind === 'rate10') v = p[field] ? per10(p[field], p.spielzeit) ?? '' : '';
       else if (kind === 'pp') v = p[field] == null ? '' : Math.round(p[field] * 1000) / 10; // Prozentpunkte
       else if (kind === 'cfq') {
         const a = vals[k - 2][c], b = vals[k - 1][c];
@@ -5612,6 +5983,7 @@ function buildStatSheet(wb, title, st, groups, shifts) {
       if (kind === 'quote') nOf[k][c] = Number(vals[k - 1][c]) || 0;
       else if (kind === 'cfq' || kind === 'pp') nOf[k][c] = (p.cf || 0) + (p.ca || 0);
       else if (kind === 'pct') nOf[k][c] = p.bbN || 0;
+      else if (kind === 'pctTw') nOf[k][c] = (p.paraden || 0) + (p.gegentoreTW || 0);
       put(r, c, v);
     });
     // „Alle“
@@ -5629,7 +6001,8 @@ function buildStatSheet(wb, title, st, groups, shifts) {
     for (let c = FIRST; c <= ALLE; c++) {
       const x = cell(r, c);
       if (kind === 'time' || kind === 'perEinsatz') x.numFmt = '[m]:ss';
-      else if (kind === 'quote' || kind === 'cfq' || kind === 'pct') x.numFmt = '0%';
+      else if (kind === 'quote' || kind === 'cfq' || kind === 'pct' || kind === 'pctTw') x.numFmt = '0%';
+      else if (kind === 'rate10') x.numFmt = '0.0';
       else if (kind === 'pp') x.numFmt = '+0" PP";-0" PP";0" PP"';
       else if (kind === 'diff' || kind === 'pm') x.numFmt = '+0;-0;0';
       x.alignment = { horizontal: 'center' };
@@ -5696,9 +6069,10 @@ function buildStatSheet(wb, title, st, groups, shifts) {
   const orDash = v => v == null ? '–' : v;
   // Zusatzspalten: { head, f: Schalter, val(x, isTotal, c), fmt, agg: 'sum' | 'max', n(x) }
   const ext = [];
-  const addQuote = (head, f, v, n) => {
+  const addQuote = (head, f, v, n, nHead) => {
     ext.push({ head, f, val: x => orDash(v(x)), fmt: '0%', n: nx ? n : null });
-    if (nx) ext.push({ head: head.startsWith('CF') ? 'n (CF+CA)' : head.startsWith('Ball') ? 'n (Ketten)' : 'n (Verluste)', f: 'stichprobeN', val: n, fmt: '0', n });
+    if (nx) ext.push({ head: nHead || (head.startsWith('CF') ? 'n (CF+CA)' : head.startsWith('Ball') ? 'n (Ketten)' : 'n (Verluste)'),
+      f: 'stichprobeN', val: n, fmt: '0', n });
   };
   if (sz) ext.push({ head: 'Spielzeit (gesch.)', f: 'spielzeitGeschaetzt', val: x => x.spielzeit / SEC_PER_DAY, fmt: '[m]:ss', agg: 'sum' });
   if (kzx) {
@@ -5710,6 +6084,22 @@ function buildStatSheet(wb, title, st, groups, shifts) {
     [`CA/10′ 0–${g1} s`, `CA/10′ ${g1}–${g2} s`, `CA/10′ über ${g2} s`].forEach((head, j) => ext.push({ head, f: 'kennzahlenExport', fmt: '0.0',
       val: (x, isTotal) => isTotal ? '' : orDash(x.schichtCa10 ? x.schichtCa10[j] : null) }));
   }
+  if (kzx && feat('gegnerschussErgebnis')) {
+    // Gegnerschüsse nach Ergebnis (Gegentore = aufs Tor); Quoten nur über bekannte Ergebnisse; Fenwick = ohne geblockte
+    const f = 'gegnerschussErgebnis', aufs = x => (x.gsTor || 0) + (x.gsGehalten || 0);
+    const zeit = x => sz ? x.spielzeit : x.eiszeit;
+    ext.push({ head: 'Gegner aufs Tor', f, val: aufs, fmt: '0', agg: 'sum' },
+      { head: 'Gegner geblockt', f, val: x => x.gsGeblockt || 0, fmt: '0', agg: 'sum' },
+      { head: 'Gegner vorbei', f, val: x => x.gsVorbei || 0, fmt: '0', agg: 'sum' },
+      { head: 'Ergebnis unbekannt', f, val: x => x.gsUnbekannt || 0, fmt: '0', agg: 'sum' },
+      { head: 'Gegner aufs Tor /10′', f, val: x => orDash(per10(aufs(x), zeit(x))), fmt: '0.0' },
+      { head: 'Gegner geblockt /10′', f, val: x => orDash(per10(x.gsGeblockt || 0, zeit(x))), fmt: '0.0' },
+      { head: 'Gegner vorbei /10′', f, val: x => orDash(per10(x.gsVorbei || 0, zeit(x))), fmt: '0.0' });
+    addQuote('Anteil aufs Tor', f, x => gsBekannt(x) ? aufs(x) / gsBekannt(x) : null, gsBekannt, 'n (Ergebnis bekannt)');
+    addQuote('Block-quote', f, x => gsBekannt(x) ? (x.gsGeblockt || 0) / gsBekannt(x) : null, gsBekannt, 'n (Ergebnis bekannt)');
+    ext.push({ head: 'FF', f, val: x => x.ff || 0, fmt: '0', agg: 'sum' }, { head: 'FA', f, val: x => x.fa || 0, fmt: '0', agg: 'sum' });
+    addQuote('FF %', f, x => pctOf(x.ff || 0, x.fa || 0), x => (x.ff || 0) + (x.fa || 0), 'n (FF+FA)');
+  }
   const heads = ['Reihe', sz ? 'Eiszeit (Video)' : 'Eiszeit', 'Schüsse', 'Gegner-schüsse', 'Tore', 'Gegen-tore',
     'Schüsse /10′', 'Gegner-schüsse /10′', 'Tore /10′', 'Gegen-tore /10′', ...ext.map(e => e.head + expMark(e.f))];
   const rvCols = [1, 3, 5, 6, 7, 8, 9, 10, 11, 12, ...ext.map((_, j) => 13 + j)];
@@ -5719,8 +6109,9 @@ function buildStatSheet(wb, title, st, groups, shifts) {
   ws.getRow(rv + 1).height = 45;
   // /10′ bezieht sich auf die Spalte mit der Zeit: geschätzte Spielzeit (M) oder Eiszeit (C)
   const zeitCol = sz ? 'M' : 'C';
-  const per10 = (cntCol, r, n, sec) => xlF(`IFERROR(${colL(cntCol)}${r}/(${zeitCol}${r}*144),"–")`, sec > 0 ? n / (sec / 600) : '–');
-  const sumOf = ['eiszeit', 'spielzeit', 'schuesse', 'gegnerschuesse', 'tore', 'gegentore', 'cf', 'ca', 'bbGesch', 'konter', 'pressN', 'pressOk'];
+  const xlPer10 = (cntCol, r, n, sec) => xlF(`IFERROR(${colL(cntCol)}${r}/(${zeitCol}${r}*144),"–")`, sec > 0 ? n / (sec / 600) : '–');
+  const sumOf = ['eiszeit', 'spielzeit', 'schuesse', 'gegnerschuesse', 'tore', 'gegentore', 'cf', 'ca', 'bbGesch', 'konter', 'pressN', 'pressOk',
+    'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa'];
   const totals = { ...Object.fromEntries(sumOf.map(f => [f, 0])), laengstePhase: 0, schichtCa10: null,
     bbN: st.kz ? st.kz.team.bbN || 0 : 0 }; // Ketten des Teams (nicht Summe der Reihen)
   const fields = ['schuesse', 'gegnerschuesse', 'tore', 'gegentore'];
@@ -5729,7 +6120,7 @@ function buildStatSheet(wb, title, st, groups, shifts) {
     put(r, 1, label);
     put(r, 3, isTotal ? sum(3, x.eiszeit / SEC_PER_DAY) : x.eiszeit / SEC_PER_DAY, { numFmt: '[m]:ss' });
     fields.forEach((f, j) => put(r, 5 + j, isTotal ? sum(5 + j, x[f]) : x[f], { numFmt: '0' }));
-    fields.forEach((f, j) => put(r, 9 + j, per10(5 + j, r, x[f], sz ? x.spielzeit : x.eiszeit), { numFmt: '0.0' }));
+    fields.forEach((f, j) => put(r, 9 + j, xlPer10(5 + j, r, x[f], sz ? x.spielzeit : x.eiszeit), { numFmt: '0.0' }));
     const nCells = {};
     ext.forEach((e, j) => {
       const c = 13 + j, v = e.val(x, isTotal);
@@ -5801,7 +6192,7 @@ function buildStatSheet(wb, title, st, groups, shifts) {
 // untereinander: Gesamt, 1., 2., 3. Drittel (+ Verlängerung).
 const KZ_SHEETS = [
   ['Corsi', (st, out) => SITS.forEach(s => renderKzCorsi(st, out, s)),
-    'CF = eigene Schussversuche, CA = Gegnerschüsse + Gegentore, gezählt für alle Feldspieler auf dem Feld. Zeiten = geschätzte Spielzeit. ' + GEGNER_HINWEIS],
+    () => 'CF = eigene Schussversuche, CA = Gegnerschüsse + Gegentore, gezählt für alle Feldspieler auf dem Feld. Zeiten = geschätzte Spielzeit. ' + gegnerHinweis()],
   ['Ballbesitz', renderKzBallbesitz,
     `Phase = Ketten, die nach Fehlpass/Ballverlust ≤ ${KZ.PHASE_LUECKE_S} s später weitergehen. Ballbesitz = Videozeit. ` + BB_HINWEIS],
   ['Umschalten', renderKzUmschalten,
@@ -5861,7 +6252,7 @@ function buildKzSheet(wb, name, render, hint, blocks) {
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
   ws.getCell(1, 1).value = name + expMark('kennzahlenExport');
   ws.getCell(1, 1).font = xlFont({ bold: true });
-  ws.getCell(2, 1).value = hint;
+  ws.getCell(2, 1).value = typeof hint === 'function' ? hint() : hint;
   ws.getCell(2, 1).font = xlFont({ italic: true, color: xlArgb(XL.MUTED) });
   if (feat('stichprobeN')) {
     ws.getCell(3, 1).value = `n = Stichprobe der Quote links daneben; grau/kursiv bei n < ${KZ.MIN_N}.`;
@@ -6046,14 +6437,22 @@ function buildEventSheet(wb) {
   const ws = wb.addWorksheet('Ereignisse', { views: [{ state: 'frozen', ySplit: 1 }] });
   const ps = periods();
   const periodOf = t => { const p = ps.find(p => t >= p.t0 && t <= p.t1); return p ? periodLabel(p.nummer) : ''; };
-  ws.addRow(['Zeit', 'Sekunden', 'Drittel', 'Typ', 'Details', 'Reihe auf dem Feld']);
+  // Experiment (gegnerschussErgebnis): Spalten G „Ergebnis“ und H „Blocker“ für Gegnerschüsse
+  const erg = feat('gegnerschussErgebnis');
+  ws.addRow(['Zeit', 'Sekunden', 'Drittel', 'Typ', 'Details', 'Reihe auf dem Feld',
+    ...(erg ? ['Ergebnis' + expMark('gegnerschussErgebnis'), 'Blocker' + expMark('gegnerschussErgebnis')] : [])]);
+  // Gegnerschuss mit Gegentor ±3 s gilt als Tor
+  const mitTor = new Set(erg ? oppAttempts().filter(x => x.tor && x.ev.typ === 'gegnerschuss').map(x => x.ev.id) : []);
   for (const ev of events) {
+    const g = ev.typ === 'gegnerschuss';
     ws.addRow([fmtTime(ev.time, true), Math.round(ev.time * 10) / 10, periodOf(ev.time),
-      TYPES[ev.typ].label, describe(ev), lineLabel(lineAt(ev.time))]);
+      TYPES[ev.typ].label, describe(ev), lineLabel(lineAt(ev.time)),
+      ...(erg ? [g ? (mitTor.has(ev.id) ? 'Tor (Gegentor)' : oppResultLabel(ev.ergebnis)) : ev.typ === 'gegentor' ? 'Tor' : '',
+        g && ev.blocker ? pl(ev.blocker) : ''] : [])]);
   }
   ws.getRow(1).eachCell(c => { c.font = xlFont({ bold: true }); c.fill = xlFill(XL.GREY); });
-  [11, 9, 11, 14, 80, 16].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-  ws.autoFilter = `A1:F${events.length + 1}`;
+  [11, 9, 11, 14, 80, 16, 12, 22].slice(0, erg ? 8 : 6).forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  ws.autoFilter = `A1:${erg ? 'H' : 'F'}${events.length + 1}`;
   return ws;
 }
 
@@ -6101,7 +6500,7 @@ const XL_EXP_HINWEIS = 'Experimentmodus – enthält ungetestete Kennzahlen';
 function markExperimentWorkbook(wb) {
   const red = xlFont({ bold: true, color: xlArgb('C00000') });
   wb.eachSheet(ws => {
-    if (ws.name === 'Ereignisse') { Object.assign(ws.getCell('H1'), { value: XL_EXP_HINWEIS, font: red }); return; }
+    if (ws.name === 'Ereignisse') { Object.assign(ws.getCell(feat('gegnerschussErgebnis') ? 'J1' : 'H1'), { value: XL_EXP_HINWEIS, font: red }); return; }
     const a1 = ws.getCell('A1');
     if (KZ_SHEETS.some(([n]) => n === ws.name)) { Object.assign(ws.getCell('A4'), { value: XL_EXP_HINWEIS, font: red }); return; }
     a1.value = `${a1.value} · ${XL_EXP_HINWEIS}`;

@@ -117,6 +117,7 @@ Spezifikation hin (insbesondere Zwei-Fenster-Prinzip unter file://).
 | `kennzahlenExport` | Experiment | Excel: Kennzahlen-Block in den Statistik-Blättern, Reihenvergleich-Spalten ab M, Blätter Corsi/Ballbesitz/Umschalten/Spielstand/Duos/Über-Unterzahl, neue Legendentexte |
 | `gegentorAlsSchuss` | Standard | Gegentor ohne Gegnerschuss ±3 s zählt als Gegnerschuss der Reihe (Heidelberg-Mannheim: kein Fall, keine Zahl verändert) |
 | `plausiTorOhneBully` | Standard | Plausibilitätscheck „Tor ohne Bully in 3 min“ (nur Hinweis, keine Zahl) |
+| `gegnerschussErgebnis` | Experiment | Nach X Ergebnis (gehalten/geblockt/vorbei/Tor) und Blocker erfassen, Nachtragen mit K, Bearbeiten in der Ereignisliste; Blocks, On-Field aufs Tor/FA, Tabellen „Gegnerschüsse nach Reihe“ und „Torhüter“, Fenwick für beide Seiten, Plausibilitätschecks, Excel-Zeilen/-Spalten (siehe „Ergebnis von Gegnerschüssen“) |
 
 Ebenfalls im Standard (harmlos, ohne Schalter): Bully-Warntext „kein
 Bullyspieler“; Ein-Bildschirm-Modus (unabhängig vom Betriebsmodus).
@@ -217,7 +218,9 @@ Modus-Umschalter oben: „Durchgang 1“ / „Durchgang 2“.
 Tasten in Durchgang 1:
 - 1, 2, 3: Reihe 1/2/3 kommt aufs Feld
 - 4: ÜZ, 5: UZ, 6: Spezial
-- X: Gegnerschuss (wird automatisch der Reihe auf dem Feld zugeordnet)
+- X: Gegnerschuss (wird automatisch der Reihe auf dem Feld zugeordnet;
+  Experiment: danach Ergebnis und ggf. Blocker, siehe unten)
+- K: (Experiment) nächster Gegnerschuss ohne Ergebnis (Nachtragen)
 - H: Gegentor
 - J: Tor Ulm
 - B: Bully gewonnen, N: Bully verloren (Bullyspieler = Standard-
@@ -233,6 +236,41 @@ der gewählte Spieler ersetzt ihn ab der aktuellen Videozeit.
 Bei Tor und Gegentor wird automatisch gespeichert, welche Spieler laut
 aktuellem Stand auf dem Feld stehen (für Plus/Minus). Der Stand wird im
 Ereignis angezeigt und ist bearbeitbar.
+
+### Ergebnis von Gegnerschüssen (Experiment)
+Schalter `gegnerschussErgebnis`. Im Standardmodus verhält sich X wie
+bisher (keine Auswahl), alle Zahlen bleiben gleich.
+- X legt den Gegnerschuss sofort an (Videozeit, Reihe). Danach erscheint in
+  der Erfassung (und im Video-Overlay) die Ergebnisauswahl; das Video läuft
+  weiter, wie bei der Schussauswahl in Durchgang 2:
+  - 2 = gehalten (aufs Tor, Torwart hält; auch ein abgefälschter Schuss,
+    der trotzdem aufs Tor kommt)
+  - 3 = geblockt (von einem Ulmer Feldspieler aufgehalten, bevor er das Tor
+    erreicht)
+  - 4 = vorbei (inkl. Pfosten/Latte)
+  - 1 = Tor: der eben angelegte Gegnerschuss wird zum Gegentor (wie H, mit
+    den Spielern auf dem Feld für Plus/Minus) – kein zweites Ereignis
+  - Esc oder Enter = unbekannt (Schuss bleibt ohne Ergebnis)
+- Nach 3 folgt die Blocker-Auswahl: Positionstasten der Formation der Reihe
+  auf dem Feld (wie in Durchgang 2, z. B. GF 2-2-1: 1 LV, 2 RV, 3 LF, 4 RF,
+  5 TOP), Buttons anklickbar, 0 = anderer Spieler (Kader-Dialog, hält das
+  Video kurz an), Esc/Enter = Blocker unbekannt. Der Torwart ist kein Blocker.
+- Solange die Auswahl offen ist, wirken Ziffern nur dort (keine
+  Reihenwechsel; andere Ziffern werden ignoriert). Ein Buchstabe (X, H, B,
+  D, O …) schließt die Auswahl (Ergebnis unbekannt) und wirkt dann normal.
+- Letzte Aktion z. B. „Gegnerschuss – gegen Reihe 2 · geblockt · #7 Müller“.
+- Ergebnis und Blocker sind in der Ereignisliste bearbeitbar (dort auch
+  „Tor – wird zum Gegentor“); Strg+Z nimmt Ergebnis, Blocker und die
+  Umwandlung zum Gegentor jeweils einzeln zurück.
+- Nachtragen: Knopf „Nächster Gegnerschuss ohne Ergebnis“ und Taste K
+  (in keinem Modus anders belegt) springen 3 s vor den nächsten offenen
+  Gegnerschuss ab der aktuellen Videozeit (am Ende wieder von vorn),
+  spielen ab und öffnen die Auswahl; danach geht es automatisch weiter.
+  Enter = unbekannt lassen und weiter, Esc = Nachtragen beenden. Anzeige
+  „noch x von y offen“.
+- Ein Gegnerschuss mit Gegentor ±3 s (X und H zur selben Szene, wie in
+  älteren Spielen) gilt als Tor: nicht „offen“, wird beim Nachtragen
+  übersprungen.
 
 ### Reihenbesetzung pro Drittel
 Oft fehlt ein Spieler und jemand hilft in einer zweiten Reihe aus, pro
@@ -385,7 +423,9 @@ beginnt; die Eiszeit wird am Drittelende abgeschnitten.
    in Durchgang 1 erfassten, Schützen der Ulmer Tore; Unterbrechung ohne Ende;
    Unterbrechung über eine Drittelgrenze hinweg; Ballbesitzketten während
    einer Unterbrechung; Tor ohne Bully in den folgenden 3 min;
-   (Experiment) Ketten mit mehr als 8 s zwischen zwei Kontakten.
+   (Experiment) Ketten mit mehr als 8 s zwischen zwei Kontakten;
+   (Experiment) Gegnerschüsse ohne Ergebnis (Anzahl, Sprung zum ersten),
+   geblockt ohne Blocker, Blocker laut Wechseln nicht auf dem Feld.
 6. (Experiment) Unterreiter „Übersicht | Erweiterte Kennzahlen“. Die Erweiterten
    Kennzahlen zeigen die Blöcke Grundlagen (Faktoren je Drittel, Hinweis
    zur Schätzung), Corsi (Situation umschaltbar), Ballbesitzzeit (mit
@@ -398,6 +438,13 @@ beginnt; die Eiszeit wird am Drittelende abgeschnitten.
    „Kennzahlen – Definitionen“, Abschnitt 10) und öffnet unten rechts eine
    Playlist; Schnellauswahl „▶ Alle Tore“, „▶ Alle Gegentore“, „Alle
    Schüsse von …“.
+8. (Experiment) Ergebnis von Gegnerschüssen: Spielertabelle zusätzlich
+   Blocks, Blocks/10, Gegner aufs Tor (Feld) und FA (Feld); darunter die
+   Tabellen „Gegnerschüsse nach Reihe β“ (Gegnerschüsse, aufs Tor,
+   geblockt, vorbei, unbekannt, aufs Tor/geblockt/vorbei je 10 min, Anteil
+   aufs Tor, Blockquote, FF, FA, FF %) und „Torhüter β“ (Paraden,
+   Gegentore, Fangquote). Definitionen siehe „Kennzahlen – Definitionen“,
+   Abschnitt 13.
 
 ## Entscheidungen (geklärt nach Plan-Review)
 - Startart: file:// per Doppelklick.
@@ -511,6 +558,17 @@ auch Programme ohne Neuberechnung die Werte zeigen.
 - Alle Rohdaten (Zeit, Sekunden, Drittel, Typ, Details, Reihe auf dem
   Feld), Kopfzeile fett/grau und fixiert, Autofilter, lesbare
   Spaltenbreiten.
+- (Experiment, `gegnerschussErgebnis`) Spalten G „Ergebnis β“ und
+  H „Blocker β“; Experiment-Hinweis dann in J1.
+
+### Ergebnis von Gegnerschüssen im Excel (Experiment)
+- Statistik-Blätter, Kennzahlen-Block: Blocks (mit „Alle“), Blocks /10′,
+  Gegner aufs Tor (Feld), Fenwick gegen (Feld), Paraden (TW),
+  Fangquote (TW, grau bei n < 5).
+- Reihenvergleich, fortlaufend nach den übrigen Kennzahl-Spalten (bei
+  Heidelberg-Mannheim Y–AM): Gegner aufs Tor, geblockt, vorbei, Ergebnis
+  unbekannt (mit Summe), je /10′, Anteil aufs Tor und Blockquote (je mit n),
+  FF, FA, FF % (mit n).
 
 ### Prüfung (20.10.2026)
 - Mit dem Spiel Heidelberg-Mannheim (nachgebaut aus dem Blatt
@@ -602,10 +660,11 @@ auf dem Feld). Hauptwert in der Spielertabelle: 5 gegen 5.
   „Spezial“ ist eine eigene Situation (nicht 5 gegen 5); im KF heißt
   5 gegen 5 „gleiche Stärke“. CF % relativ: nur Drittel, in denen er
   gespielt hat, gleiche Situation, in Prozentpunkten. Torhüter ohne Corsi.
-- Festlegung: Gegnerschüsse sind alle Versuche (auch geblockt/vorbei), aber
-  ohne Ergebnis erfasst. Für den Gegner deshalb kein Fenwick und kein
-  „aufs Tor %“; Hinweis „Ergebnis der Gegnerschüsse nicht erfasst“
-  (Bildschirm und Excel). Die Spalten heißen „eigene aufs Tor %“ und
+- Festlegung: Gegnerschüsse sind alle Versuche (auch geblockt/vorbei).
+  Ohne den Schalter `gegnerschussErgebnis` sind sie ohne Ergebnis erfasst;
+  dann für den Gegner kein Fenwick und kein „aufs Tor %“, Hinweis
+  „Ergebnis der Gegnerschüsse nicht erfasst“. Mit Schalter: siehe
+  Abschnitt 13. Die Corsi-Spalten heißen „eigene aufs Tor %“ und
   „eigene geblockt %“.
 
 ### 2. Ballbesitzzeit
@@ -739,6 +798,35 @@ Bildschirm und im Excel. n je Quote:
   Beginn in ÜZ/UZ
 - Überzahlquote / Unterzahl überstanden: Anzahl Strafen
 - beteiligt an % (Passnetzwerk): Pässe des Teams
+- Anteil aufs Tor, Blockquote (Gegner): Gegnerschüsse mit bekanntem
+  Ergebnis; FF %: FF + FA; Fangquote: Paraden + Gegentore
+
+### 13. Ergebnis von Gegnerschüssen (Experiment, `gegnerschussErgebnis`)
+- Ergebnis je gegnerischem Schussversuch: Gegentor (auch Gegnerschuss mit
+  Gegentor ±3 s) = Tor; sonst gehalten / geblockt / vorbei wie erfasst;
+  fehlt es: unbekannt. Gehalten = aufs Tor, Torwart hält (auch
+  abgefälscht, wenn er trotzdem aufs Tor kommt); geblockt = von einem
+  Ulmer Feldspieler aufgehalten, bevor er das Tor erreicht; vorbei inkl.
+  Pfosten/Latte.
+- Zuordnung zur Reihe wie bei „Gegnerschüsse“ im Reihenvergleich (Reihe auf
+  dem Feld beim Gegnerschuss; einzelnes Gegentor: Reihe zur Torzeit). Damit
+  gilt je Reihe: Gegnerschüsse = aufs Tor + geblockt + vorbei + unbekannt;
+  ein Gegentor zählt genau einmal (X → 1 erzeugt kein zweites Ereignis).
+- Aufs Tor = gehalten + Gegentore. Anteil aufs Tor = aufs Tor ÷ Schüsse mit
+  bekanntem Ergebnis; Blockquote = geblockt ÷ Schüsse mit bekanntem
+  Ergebnis (Gegentore zählen als bekannt). /10 je 10 min Spielzeit.
+- Fenwick: FA = Gegnerschüsse ohne geblockte (inkl. Gegentore und
+  unbekannte), FF = eigene Schüsse ohne geblockte, FF % = FF ÷ (FF + FA).
+  Reihen: alle Situationen (wie CF % im Reihenvergleich).
+- Spieler: Blocks = geblockte Gegnerschüsse mit ihm als Blocker (alle
+  Situationen), Blocks /10 je 10 min Spielzeit; On-Field (5 gegen 5, wie
+  CF/CA): Gegner aufs Tor und FA, solange er auf dem Feld steht.
+- Torhüter (wer laut Wechseln im Tor steht): Paraden = gehalten,
+  Gegentore, Fangquote = Paraden ÷ (Paraden + Gegentore).
+- Datenmodell: gegnerschuss `{ reiheAufFeld, ergebnis?: 'gehalten' |
+  'geblockt' | 'vorbei', blocker?: spielerId }`; fehlendes Ergebnis =
+  unbekannt. Alte Sicherungen bleiben gültig, das JSON hängt nicht vom
+  Modus ab.
 
 ### Prüfwerte Heidelberg-Mannheim (27.10.2026)
 - Faktoren 0,840 / 0,842 / 0,872 (erwartet ca. 0,84 / 0,84 / 0,87).
@@ -752,14 +840,31 @@ Bildschirm und im Excel. n je Quote:
   von 25, die eine Rückeroberung war ein Freischlag). Starts Torwart 9,
   davon 0 Konter.
 
+### Prüfung Ergebnis von Gegnerschüssen (02.11.2026)
+- Standard: X ohne Auswahl (danach wirkt 2 als Reihenwechsel); Excel gegen
+  die Referenz unverändert (ganze Zahlen identisch, Zeiten ≤ 0,29 s),
+  706 Formeln ohne Fehler; Ereignis-Blatt mit 6 Spalten.
+- Experiment: Prüfwerte vom 27.10. unverändert; 46 Gegnerschüsse, davon 5
+  mit Gegentor (= Tor), 41 offen zum Nachtragen.
+- Testkopie mit Ergebnissen und Blockern: je Reihe und Drittel
+  Gegnerschüsse = aufs Tor + geblockt + vorbei + unbekannt, FA =
+  Gegnerschüsse − geblockt, Summe Blocks = geblockte mit Blocker,
+  Gegentore = „Tor“ (keine Doppelzählung). Tastenfolgen bei laufendem
+  Video (X → 2, X → 3 → 1, X → 1, X → Enter, X → 6 → B), Rückgängig
+  Schritt für Schritt, Bearbeiten (inkl. Tor → Gegentor), Nachtragen mit K
+  (überspringt Schüsse mit Gegentor) geprüft. Moduswechsel ändert das
+  JSON nicht. Excel 810 Formeln ohne Fehler.
+
 ## Bekannte Grenzen
 - Gleichzeitige Strafen (4 gegen 4) und angezeigte Strafen werden nicht
   gesondert erfasst; maßgeblich ist die gesetzte Reihe (ÜZ/UZ/1–3).
 - Spielzeit ist geschätzt (Faktor je Drittel = Drittellänge ÷
   Netto-Videozeit); Stillstand bei Ball im Aus wird gleichmäßig verteilt
   angenommen. Exakt erst mit Spieluhr.
-- Ergebnis der Gegnerschüsse fehlt (nur Versuche erfasst): kein Fenwick und
-  kein „aufs Tor %“ für den Gegner.
+- Ergebnis der Gegnerschüsse: im Standardmodus nicht erfasst (kein Fenwick
+  und kein „aufs Tor %“ für den Gegner). Im Experimentmodus erfassbar
+  (inkl. Nachtragen); Quoten zählen nur Schüsse mit bekanntem Ergebnis, FA
+  enthält auch unbekannte.
 
 ## Datenmodell (Vorschlag)
 - game: { id, datum, gegner, modus, video: { name, size, duration },
@@ -769,7 +874,8 @@ Bildschirm und im Excel. n je Quote:
     strafen: [{ periode, zeit, team, nummer, art, grund }], timeouts[] }
 - events[]: jedes Ereignis mit { id, typ, time, ...typabhängige Felder }
   - wechsel: { reihe, spieler[] } bzw. einzelwechsel: { raus, rein }
-  - gegnerschuss: { reiheAufFeld }
+  - gegnerschuss: { reiheAufFeld, ergebnis?: gehalten | geblockt | vorbei,
+    blocker?: spielerId } (Ergebnis/Blocker optional, Experiment)
   - tor / gegentor: { aufDemFeld[], schuetze?, vorlage? } (Schütze/Vorlage
     bei Ulmer Toren, vorgeschlagen aus dem Spielbericht)
   - bully: { spieler, gewonnen }

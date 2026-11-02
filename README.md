@@ -85,7 +85,8 @@ Oben rechts **„Standard“ / „Experiment“** (Standard ist voreingestellt, 
   angezeigt und berechnet wird.
 
 Zurzeit experimentell: Erweiterte Kennzahlen, geschätzte Spielzeit (Drittellänge), automatische
-Tor-Pause, Szenen per Klick und Clip-Export, Stichprobe n, Kennzahlen im Excel. Neue Funktionen
+Tor-Pause, Szenen per Klick und Clip-Export, Stichprobe n, Kennzahlen im Excel, Ergebnis und Blocker
+bei Gegnerschüssen. Neue Funktionen
 kommen immer zuerst in den Experimentmodus.
 
 ## Setup vor dem Spiel
@@ -122,6 +123,14 @@ Ziel: Wer stand wann auf dem Feld, und was waren die großen Ereignisse.
   tauschen: Rechtsklick auf den Spielerbutton.
 - **Gegnerschuss** `X` (jeder Schussversuch, auch geblockt oder vorbei), **Gegentor** `H`,
   **Tor** `J`. Bei Toren speichert das Tool, wer auf dem Feld stand (Plus/Minus).
+- **Ergebnis des Gegnerschusses** (β, nur im Experimentmodus): nach `X` erscheint eine Auswahl,
+  das Video läuft weiter. `2` gehalten · `3` geblockt · `4` vorbei (auch Pfosten/Latte) · `1` Tor
+  (wird direkt zum Gegentor) · `Enter`/`Esc` unbekannt. Nach `3` den Blocker per Positionstaste
+  wählen (wie in Durchgang 2, `0` = anderer Spieler, `Enter` = unbekannt). Solange die Auswahl
+  offen ist, wechseln Ziffern keine Reihe.
+- **Nachtragen** (β): `K` springt zum nächsten Gegnerschuss ohne Ergebnis und öffnet die Auswahl,
+  danach geht es automatisch weiter („noch x von y offen“). So lassen sich ältere Spiele in
+  wenigen Minuten ergänzen.
 - **Bully** gewonnen `B` / verloren `N`, **Strafe** `P`.
 - **Unterbrechung** `O` (Timeout, Verletzung, Sonstiges), nochmal `O` beendet sie. Die Zeit
   zählt nicht als Eiszeit. Im Experimentmodus (β) zieht das Tool die Zeit zwischen Tor und
@@ -149,6 +158,7 @@ Beispiel: Ballgewinn durch den linken Verteidiger, über Flügel und Top zum Sch
 |---|---|
 | Video | Leertaste Play/Pause · `←` `→` 2 s · Umschalt + `←` `→` 10 s · `,` `.` Tempo |
 | Durchgang 1 | `D` Drittel · `1`–`6` Reihen · `X` Gegnerschuss · `H` Gegentor · `J` Tor · `B`/`N` Bully · `P` Strafe |
+| Durchgang 1 (β) | nach `X`: `1` Tor · `2` gehalten · `3` geblockt (dann Blocker per Positionstaste, `0` anderer) · `4` vorbei · `Enter` unbekannt · `K` nächster Gegnerschuss ohne Ergebnis |
 | Durchgang 2 | `1`–`6` Spieler nach Position · `0` anderer Spieler · `A S D F G` Start · `Q W E R T` Ende · nach `E`: `1`–`4` Schussergebnis |
 | Immer | `O` Unterbrechung · `Strg+Z` rückgängig · `Esc` (oder Rücktaste) Kette verwerfen |
 | Ein Bildschirm | `Z` Theatermodus an/aus |
@@ -170,6 +180,10 @@ Alle Werte gibt es für das Gesamtspiel und für jedes Drittel einzeln.
 - **Reihenvergleich:** Eiszeit, Schüsse und Gegnerschüsse, Tore, Werte pro 10 Minuten Eiszeit; im
   Experimentmodus pro 10 Minuten geschätzter Spielzeit und weitere Kennzahlen (β)
 - **Passmatrix** (Heatmap) und **Passnetzwerk** pro Reihe
+- **Gegnerschüsse nach Ergebnis** (β): Spielertabelle mit Blocks und zugelassenen Schüssen aufs
+  Tor bzw. Fenwick gegen (auf dem Feld); Tabelle „Gegnerschüsse nach Reihe“ (aufs Tor, geblockt,
+  vorbei, unbekannt, Anteil aufs Tor, Blockquote, FF / FA / FF %) und „Torhüter“ (Paraden,
+  Fangquote). Plausibilitätschecks für offene Ergebnisse und Blocker.
 
 **Erweiterte Kennzahlen** (β, nur im Experimentmodus)
 
@@ -238,7 +252,9 @@ Stand sonst weg.
 
 - Die Spielzeit ist **geschätzt**: Stillstand bei Ball im Aus wird gleichmäßig über das Drittel
   verteilt angenommen. Exakt wäre es erst mit der Spieluhr aus dem Video.
-- Bei Gegnerschüssen wird kein Ergebnis erfasst. Für den Gegner gibt es deshalb kein „aufs Tor %“.
+- Im Standardmodus wird bei Gegnerschüssen kein Ergebnis erfasst, für den Gegner gibt es dort kein
+  „aufs Tor %“ und kein Fenwick. Im Experimentmodus (β) lässt sich das Ergebnis erfassen und
+  nachtragen; Quoten zählen nur Schüsse mit bekanntem Ergebnis.
 - Gleichzeitige Strafen (4 gegen 4) und angezeigte Strafen werden nicht gesondert erfasst.
 - Getestet mit Google Chrome unter Windows.
 
