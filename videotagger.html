@@ -332,6 +332,24 @@
   }
   #oppPanel button { display: inline-flex; gap: 6px; align-items: center; }
   #oppTools:empty { display: none; }
+  /* Schussort-Skizze (β) */
+  #ortPanel { padding: 8px 10px; margin-bottom: 10px; border-radius: 6px; border: 1px solid #3fb6b0; background: #142a28; }
+  #ortPanel .ortHead { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; margin-bottom: 4px; }
+  .ortHint { color: var(--muted); font-size: 12px; }
+  .ortDir { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; margin-bottom: 4px; }
+  .ortDir button { padding: 2px 10px; }
+  .ortDir button.active { background: #3fb6b0; border-color: #3fb6b0; color: #fff; }
+  .warnText { color: var(--warn); }
+  .ortCanvas { display: block; width: 100%; max-width: 640px; margin: 2px auto 0; cursor: crosshair; }
+  .ortBtns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+  .ortBtns button { display: inline-flex; gap: 6px; align-items: center; }
+  #ortLast { display: flex; gap: 8px; align-items: center; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+  #ortLast[hidden] { display: none; }
+  .ortMini { flex: none; }
+  #ortTools:empty { display: none; }
+  #ortTools .ortHint { align-self: center; }
+  .ev.o6 { grid-template-columns: 62px 98px 1fr auto auto auto; }
+  .ev button.icon.ortOn { color: #3fb6b0; }
   #oppTools .hint { align-self: center; }
 
   /* ----- Auswertung ----- */
@@ -596,6 +614,8 @@
       <button id="btnMark" hidden title="Szene markieren (Taste M, beide Durchgänge) – Kategorie und Notiz später in der Ereignisliste"><kbd>M</kbd>Markieren β</button>
       <button id="btnEvDrawer" title="Ereignisliste ein-/ausklappen">Liste ▸</button>
     </div>
+    <div id="ortPanel" hidden></div>
+    <div id="ortLast" hidden></div>
     <div id="field"></div>
 
     <div id="d1Panel">
@@ -630,6 +650,7 @@
       </div>
       <p class="hint" id="d2Help"></p>
     </div>
+    <div class="btnGrid" id="ortTools"></div>
 
     <p class="hint">
       Video: <kbd>Leertaste</kbd> Play/Pause · <kbd>←</kbd><kbd>→</kbd> 2 s (mit <kbd>Umschalt</kbd> 10 s) ·
@@ -834,6 +855,14 @@ const KZ = {
   DUO_MIN_S: 180,           // Duos ab 3 min gemeinsamer Spielzeit
   KLEINE_STICHPROBE_S: 120, // Zellen mit < 2 min Spielzeit grau/kursiv
   MIN_N: 5,                 // Quoten mit Stichprobe n < 5 grau
+  // Schussarten (Schalter schussartAuto); Zeiten = Videozeit ohne O-Unterbrechungen
+  DIREKT_S: 1.0,            // Direktschuss: Schuss ≤ 1,0 s nach dem Ballkontakt des Schützen (grobe Näherung: zwei Tastendrücke)
+  ABPRALLER_S: 3,           // Abpraller/zweite Chance: ≤ 3 s nach dem vorigen Schuss desselben Teams
+  NACH_BULLY_S: 5,          // nach Bully: Kette mit Start Bully, Schuss ≤ 5 s nach Kettenbeginn
+  // Paradenarten (Schalter paradenAuto)
+  PARADE_S: 4,              // was ≤ 4 s nach einem gehaltenen Schuss passiert
+  RICHTUNG_MIN: 2,          // Plausibilität: ab 2 Schüssen aus der eigenen Hälfte in einem Drittel, die mehr als die
+                            // Hälfte der Schüsse mit Ort sind → „Richtung vermutlich vertauscht“
 };
 // Funktions-Schalter: Eine Funktion ist aktiv, wenn ihr Wert 'standard' ist oder der Experimentmodus
 // läuft. Neue Funktionen starten mit 'experiment'; übernehmen in den Standard = Wert auf 'standard'.
@@ -852,7 +881,44 @@ const FEATURES = {
   loseBaelle:           'experiment', // Spalten „Lose Bälle“ und „Rückeroberungen“ (Spieler, Reihen)
   ballbilanz:           'experiment', // Tabelle „Ballsicherheit“: Ballbilanz, Ballbilanz /10, Verluste je 10 Ballkontakte
   markierungen:         'experiment', // Taste M: Szene markieren, Kategorie/Notiz, Playlist „Markierte Szenen“
+  schussort:            'experiment', // Schussort per Feldskizze, Angriffsrichtung je Drittel, Nachtragen (L), Schusskarten, Blätter „Schusskarten“/„Schüsse“
+  schussartAuto:        'experiment', // Schussarten automatisch (Direktschuss, Abpraller, Konter, nach Bully, Fernschuss …)
+  paradenAuto:          'experiment', // Paradenarten automatisch (gefangen, Abpraller gesichert/Gegner, ins Aus …)
 };
+
+// Spielfeld je Spielmodus in Metern (Regeln Floorball Deutschland/IFF). Länge und Breite sind pro Spiel
+// im Setup änderbar (game.feld), die übrigen Maße hier. Torlinie = Abstand Torlinie–Querbande
+// (Torraum-Abstand + 0,65 m); das Tor steht mit den Pfosten auf der Torlinie, Öffnung zur Mitte.
+const FELD = {
+  GF: { laenge: 40, breite: 20, torlinie: 3.5, torraumAbstand: 2.85, torraumTiefe: 4, torraumBreite: 5,
+    schutzTiefe: 1, schutzBreite: 2.5, torBreite: 1.6, torTiefe: 0.65, bullyRand: 1.5, eckRadius: 1.5 },
+  KF: { laenge: 28, breite: 16, torlinie: 3.0, torraumAbstand: 2.35, torraumTiefe: 3, torraumBreite: 4.5,
+    schutzTiefe: 1, schutzBreite: 2.5, torBreite: 1.6, torTiefe: 0.65, bullyRand: 1.5, eckRadius: 1.2 },
+};
+// Schusszonen (Distanz gemessen zur Mitte der Torlinie, Winkel zur Mittelachse des Feldes).
+// Reihenfolge der Prüfung: eigene Hälfte → Distanz → Slot → spitzer Winkel → Halbdistanz.
+const ZONEN = {
+  SLOT_M: 7,               // Slot: höchstens 7 m …
+  SLOT_HALBBREITE_M: null, // … und seitlich höchstens die halbe Torraumbreite (null = aus FELD: GF 2,5 m, KF 2,25 m)
+  DISTANZ_M: 12,           // Distanz: über 12 m
+  SPITZ_GRAD: 50,          // spitzer Winkel: nicht Slot, ≤ 12 m, ab 50° zur Mittelachse (hinter dem Tor > 90°)
+};
+const ZONE_DEFS = [
+  { code: 'slot',    label: 'Slot' },
+  { code: 'halb',    label: 'Halbdistanz' },
+  { code: 'spitz',   label: 'Spitzer Winkel' },
+  { code: 'distanz', label: 'Distanz' },
+  { code: 'eigen',   label: 'Eigene Hälfte' },
+];
+const zoneLabel = code => (ZONE_DEFS.find(z => z.code === code) || { label: '–' }).label;
+// Abfrage des Schussorts (Setup, pro Spiel): Stufen bauen aufeinander auf
+const ORT_ABFRAGE = [
+  ['aus',     'aus'],
+  ['tore',    'nur Tore und Gegentore'],
+  ['eigene',  'alle eigenen Schüsse (+ Gegentore)'],
+  ['alle',    'alle Schüsse (eigene und Gegner)'],
+];
+const ORT_KEY = 'l'; // beide Durchgänge: nächster Schuss ohne Ort
 const modus = () => prefs.get('modus', 'standard');
 const feat = name => FEATURES[name] === 'standard' || modus() === 'experiment';
 const BETA = ' β'; // Kennzeichen experimenteller Spalten, Zeilen und Flächen
@@ -1188,6 +1254,7 @@ function undo() {
   const u = undoStack.pop();
   if (!u) { notice('Nichts mehr rückgängig zu machen.'); return; }
   oppPick = null; // offene Ergebnisauswahl eines Gegnerschusses schließen
+  ortPick = null; ortNachtrag = null; // offene Schussort-Skizze schließen
   if (u.op === 'chain') {
     chain = u.before;
     notice('Kettenschritt rückgängig.');
@@ -1223,6 +1290,7 @@ function changed() {
   renderEvents();
   refreshLive(true);
   renderChain();
+  renderOrtPanel();
   if (session.view === 'auswertung') renderStats();
 }
 
@@ -1451,12 +1519,12 @@ function setOppResult(code) {
   const nachtragen = oppPick.nachtragen;
   if (code === 'tor') {
     // Der Gegnerschuss wird zum Gegentor (wie H, mit Spielern auf dem Feld für Plus/Minus)
-    const upd = { id: ev.id, typ: 'gegentor', time: ev.time, aufDemFeld: onFieldIds(lineupAt(ev.time)) };
+    const upd = { id: ev.id, typ: 'gegentor', time: ev.time, aufDemFeld: onFieldIds(lineupAt(ev.time)), ...(ev.ort ? { ort: ev.ort } : {}) };
     oppPick = null;
     replaceEvent(upd);
     showOppLast(upd);
     flash('Gegentor');
-    if (nachtragen) nextOppOffen(ev.time);
+    if (nachtragen) nextOppOffen(ev.time); else maybeAskOrt(ev.id, 'tor');
     return;
   }
   const upd = { ...ev, ergebnis: code };
@@ -1467,7 +1535,7 @@ function setOppResult(code) {
   if (code === 'geblockt') { oppPick.stage = 'blocker'; renderOppPanel(); return; }
   oppPick = null;
   renderOppPanel();
-  if (nachtragen) nextOppOffen(ev.time);
+  if (nachtragen) nextOppOffen(ev.time); else maybeAskOrt(ev.id, code);
 }
 
 function setOppBlocker(id) {
@@ -1481,7 +1549,7 @@ function setOppBlocker(id) {
     flash('Block: ' + nr(id));
   }
   renderOppPanel();
-  if (nachtragen && ev) nextOppOffen(ev.time);
+  if (nachtragen && ev) nextOppOffen(ev.time); else if (ev) maybeAskOrt(ev.id, 'geblockt');
 }
 
 // Feldspieler (ohne Torwart), die zum Zeitpunkt des Schusses auf dem Feld stehen, mit Positionstaste
@@ -1526,7 +1594,7 @@ function oppKey(key) {
   if (oppPick.stage === 'ergebnis') {
     const r = OPP_RESULTS.find(s => s.key === key);
     if (r) return () => setOppResult(r.code);
-    if (key === 'enter') return () => { const ev = oppEvent(); oppPick = null; renderOppPanel(); if (nachtragen && ev) nextOppOffen(ev.time); };
+    if (key === 'enter') return () => { const ev = oppEvent(); oppPick = null; renderOppPanel(); if (nachtragen && ev) nextOppOffen(ev.time); else if (ev) maybeAskOrt(ev.id, null); };
     if (key === 'escape') return () => closeOppPick();
   } else {
     if (key === '0') return () => oppOtherBlocker();
@@ -1579,6 +1647,401 @@ function renderOppPanel() {
   overlayInfo.kette = session.durchgang === 2 ? chainText() : oppPromptText();
 }
 
+// ======================================================================
+// Schussort (Schalter schussort): Feldskizze, Angriffsrichtung, Erfassung und Nachtragen
+// Gespeichert wird nur der rohe Klick in Kamerasicht (ort: { x, y }, 0–100, x links → rechts,
+// y oben → unten). Lage zum angegriffenen Tor, Distanz, Winkel und Zone werden erst in der
+// Auswertung aus game.richtung berechnet – eine korrigierte Richtung wirkt sofort überall.
+// ======================================================================
+
+// Maße des Spielfelds (Länge/Breite pro Spiel änderbar: game.feld = { GF?: { laenge, breite }, KF?: … })
+const feldMass = (m = game.modus) => ({ ...FELD[m], ...((game.feld || {})[m] || {}) });
+const slotHalbbreite = F => ZONEN.SLOT_HALBBREITE_M ?? F.torraumBreite / 2;
+const richtungKey = n => n >= 4 ? 'V' : String(n);
+// Angriffsrichtung von Ulm (Kamerasicht) im Drittel zur Zeit t: 'rechts' | 'links' | null
+const richtungAt = t => { const n = drittelAt(t).nummer; return n ? ((game.richtung || {})[richtungKey(n)] || null) : null; };
+const gegenRichtung = r => r === 'rechts' ? 'links' : r === 'links' ? 'rechts' : null;
+const ortAbfrage = () => game.schussortAbfrage || 'aus';
+
+// Ereignis, das den Ort eines Schussversuchs trägt: eigene Kette (ballbesitz.ort), Tor aus Durchgang 1
+// ohne Kette, Gegnerschuss, Gegentor ohne Gegnerschuss (jeweils ort)
+const shotTeam = ev => (ev.typ === 'ballbesitz' || ev.typ === 'tor') ? 'ulm' : 'gegner';
+const shotTimeOf = ev => ev.typ === 'ballbesitz' ? (ev.tEnde ?? ev.time) : ev.time;
+const shotErgOf = ev => ev.typ === 'ballbesitz' ? (ev.schussErgebnis || 'unbekannt')
+  : (ev.typ === 'tor' || ev.typ === 'gegentor') ? 'tor' : (ev.ergebnis || 'unbekannt');
+
+function setRichtung(n, v) {
+  const r = { ...(game.richtung || {}) };
+  if (v) r[richtungKey(n)] = v; else delete r[richtungKey(n)];
+  game.richtung = r;
+  persist();
+  renderOrtPanel();
+  if (session.view === 'auswertung') renderStats();
+}
+
+// Lage eines Schusses: in Metern, gedreht auf „Angriff auf das Tor rechts“ (bei Angriff nach links
+// um 180° gedreht, damit links/rechts vom Tor stimmen). tiefe = Abstand vor der Torlinie (negativ =
+// hinter dem Tor), seite = seitlicher Abstand zur Mittelachse (+ = rechts aus Sicht des Schützen).
+function shotGeo(ort, t, team) {
+  if (!ort) return null;
+  const r = richtungAt(t);
+  if (!r) return { ohneRichtung: true };
+  const F = feldMass();
+  const ziel = team === 'ulm' ? r : gegenRichtung(r); // Seite des angegriffenen Tors
+  let X = ort.x / 100 * F.laenge, Y = ort.y / 100 * F.breite;
+  if (ziel === 'links') { X = F.laenge - X; Y = F.breite - Y; }
+  const tiefe = F.laenge - F.torlinie - X, seite = Y - F.breite / 2;
+  const dist = Math.hypot(tiefe, seite);
+  const winkel = Math.atan2(Math.abs(seite), tiefe) * 180 / Math.PI;
+  const zone = X < F.laenge / 2 ? 'eigen'
+    : dist > ZONEN.DISTANZ_M ? 'distanz'
+    : tiefe >= 0 && Math.abs(seite) <= slotHalbbreite(F) && dist <= ZONEN.SLOT_M ? 'slot'
+    : winkel >= ZONEN.SPITZ_GRAD ? 'spitz' : 'halb';
+  // Meter auf dem Halbfeld (Tor oben): xm = quer (0 = linke Bande aus Sicht des Schützen), ym = Abstand zur Querbande
+  return { tiefe, seite, dist, winkel, zone, xm: Y, ym: F.laenge - X };
+}
+
+const ortText = g => !g ? 'unbekannt' : g.ohneRichtung ? 'Richtung fehlt'
+  : `${zoneLabel(g.zone)}, ${Math.round(g.dist)} m`;
+
+// Alle Schussversuche beider Teams (wie Corsi: eigene Schüsse inkl. Tore nur aus Durchgang 1,
+// Gegnerschüsse + Gegentore), mit Ort und Lage. Reihe wie im Reihenvergleich.
+function shotList() {
+  const out = [];
+  for (const x of ownShots()) out.push({ x, team: 'ulm', time: x.time, ev: x.ev, erg: x.erg || 'unbekannt',
+    ort: x.ev.ort || null, line: lineAt(x.time) || '_', schuetze: x.schuetze || null });
+  for (const x of oppAttempts()) out.push({ x, team: 'gegner', time: x.time, ev: x.ev, erg: oppErg(x), ort: x.ev.ort || null,
+    line: x.ev.typ === 'gegnerschuss' ? (x.ev.reiheAufFeld || '_') : (lineAt(x.time) || '_') });
+  for (const s of out) s.geo = shotGeo(s.ort, s.time, s.team);
+  return out.sort((a, b) => a.time - b.time);
+}
+
+// ---------- Zeichnen (Bildschirm, Erfassung und Excel-Bilder aus denselben Funktionen) ----------
+const ORT_FARBEN = { tor: '#2ea043', gehalten: '#4c8eda', geblockt: '#e3a008', vorbei: '#d9534f', unbekannt: '#9aa0a6' };
+const ORT_ZEICHEN = [['tor', '★', 'Tor'], ['gehalten', '○', 'gehalten'], ['geblockt', '△', 'geblockt'], ['vorbei', '✕', 'vorbei'], ['unbekannt', '◇', 'unbekannt']];
+const RINK_STIL = {
+  dunkel: { boden: '#18261e', linie: 'rgba(255,255,255,.62)', fein: 'rgba(255,255,255,.32)', tor: '#f0f0f0', text: 'rgba(255,255,255,.7)', rand: '#0d0d0d', wahl: '#ffffff' },
+  druck:  { boden: '#ffffff', linie: '#4a4a4a', fein: '#9a9a9a', tor: '#1a1a1a', text: '#555555', rand: '#ffffff', wahl: '#000000' },
+};
+
+// Linien des Spielfelds; tf(X, Y) bildet Meter (X entlang der langen Seite, Y quer, Kamerasicht) auf
+// Pixel ab. half = nur die rechte Hälfte (Halbfeld mit dem angegriffenen Tor).
+function drawRinkLines(ctx, tf, F, S, half) {
+  const L = F.laenge, B = F.breite;
+  const pts = list => list.map(([x, y]) => tf(x, y));
+  const poly = (list, fill) => {
+    ctx.beginPath();
+    pts(list).forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); } else ctx.stroke();
+  };
+  const rect = (x0, y0, x1, y1, fill) => poly([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], fill);
+  const line = (x0, y0, x1, y1) => { const [a, b] = [tf(x0, y0), tf(x1, y1)]; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); };
+  const [p0, p1] = [tf(half ? L / 2 : 0, 0), tf(L, B)];
+  const bx0 = Math.min(p0[0], p1[0]), bx1 = Math.max(p0[0], p1[0]), by0 = Math.min(p0[1], p1[1]), by1 = Math.max(p0[1], p1[1]);
+  const s = Math.hypot(tf(1, 0)[0] - tf(0, 0)[0], tf(1, 0)[1] - tf(0, 0)[1]); // Pixel je Meter
+  const r = F.eckRadius * s;
+  ctx.lineWidth = Math.max(1, s * 0.12);
+  ctx.strokeStyle = S.linie;
+  // Boden und Bande (Halbfeld: offen zur Mittellinie unten)
+  ctx.beginPath();
+  if (half) {
+    ctx.moveTo(bx0, by1); ctx.lineTo(bx0, by0 + r); ctx.arcTo(bx0, by0, bx0 + r, by0, r);
+    ctx.lineTo(bx1 - r, by0); ctx.arcTo(bx1, by0, bx1, by0 + r, r); ctx.lineTo(bx1, by1);
+  } else ctx.roundRect(bx0, by0, bx1 - bx0, by1 - by0, r);
+  ctx.fillStyle = S.boden; ctx.fill();
+  ctx.lineWidth = Math.max(1.5, s * 0.2); ctx.stroke();
+  ctx.lineWidth = Math.max(1, s * 0.1);
+  line(L / 2, 0, L / 2, B); // Mittellinie
+  const ends = half ? [d => L - d] : [d => d, d => L - d];
+  for (const ex of ends) {
+    const yc = B / 2;
+    rect(ex(F.torraumAbstand), yc - F.torraumBreite / 2, ex(F.torraumAbstand + F.torraumTiefe), yc + F.torraumBreite / 2);
+    ctx.strokeStyle = S.fein;
+    rect(ex(F.torlinie), yc - F.schutzBreite / 2, ex(F.torlinie + F.schutzTiefe), yc + F.schutzBreite / 2);
+    ctx.strokeStyle = S.linie;
+    rect(ex(F.torlinie - F.torTiefe), yc - F.torBreite / 2, ex(F.torlinie), yc + F.torBreite / 2, S.tor);
+  }
+  // Bullypunkte (Kreuze): Mitte, Mittellinie und verlängerte Torlinien, je 1,5 m von der langen Bande
+  const k = 0.35;
+  const cross = (x, y) => { line(x - k, y - k, x + k, y + k); line(x - k, y + k, x + k, y - k); };
+  ctx.strokeStyle = S.fein;
+  cross(L / 2, B / 2);
+  for (const y of [F.bullyRand, B - F.bullyRand]) {
+    cross(L / 2, y);
+    for (const ex of ends) cross(ex(F.torlinie), y);
+  }
+  ctx.strokeStyle = S.linie;
+}
+
+function drawShotMarker(ctx, x, y, erg, r, S, hervor) {
+  const c = ORT_FARBEN[erg] || ORT_FARBEN.unbekannt;
+  ctx.save();
+  ctx.lineWidth = Math.max(1.5, r * 0.38);
+  ctx.strokeStyle = c;
+  ctx.beginPath();
+  if (erg === 'tor') {
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.6 : r * 1.45;
+      ctx[i ? 'lineTo' : 'moveTo'](x + rr * Math.cos(a), y + rr * Math.sin(a));
+    }
+    ctx.closePath();
+    ctx.fillStyle = c; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = S.rand; ctx.stroke();
+  } else if (erg === 'gehalten') {
+    ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.stroke();
+  } else if (erg === 'geblockt') {
+    ctx.moveTo(x, y - r * 1.15); ctx.lineTo(x + r, y + r * 0.75); ctx.lineTo(x - r, y + r * 0.75); ctx.closePath(); ctx.stroke();
+  } else if (erg === 'vorbei') {
+    ctx.moveTo(x - r * 0.8, y - r * 0.8); ctx.lineTo(x + r * 0.8, y + r * 0.8);
+    ctx.moveTo(x - r * 0.8, y + r * 0.8); ctx.lineTo(x + r * 0.8, y - r * 0.8); ctx.stroke();
+  } else {
+    ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.stroke();
+  }
+  if (hervor) { ctx.beginPath(); ctx.lineWidth = 1.5; ctx.strokeStyle = S.wahl; ctx.arc(x, y, r * 1.9, 0, 2 * Math.PI); ctx.stroke(); }
+  ctx.restore();
+}
+
+// Canvas auf CSS-Breite × Seitenverhältnis bringen (scharf bei hoher Pixeldichte); liefert den Kontext
+function prepCanvas(canvas, w, hgt, scale) {
+  const dpr = scale || window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(hgt * dpr);
+  canvas.style.width = w + 'px'; canvas.style.height = hgt + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, hgt);
+  return ctx;
+}
+
+// Ganzes Feld in Kamerasicht (Erfassung). opts: { punkte: [{ x, y, erg }], richtung, mini, breite }
+function drawFullRink(canvas, opts = {}) {
+  const F = feldMass(), S = RINK_STIL.dunkel;
+  const w = opts.breite || canvas.clientWidth || canvas.parentElement.clientWidth || 440;
+  const pad = opts.mini ? 2 : 10, top = opts.mini || !opts.richtung ? pad : 16;
+  const sc = Math.min((w - 2 * pad) / F.laenge, 4000);
+  const hgt = Math.round(F.breite * sc + pad + top);
+  const ctx = prepCanvas(canvas, w, hgt);
+  const ox = (w - F.laenge * sc) / 2;
+  const tf = (X, Y) => [ox + X * sc, top + Y * sc];
+  canvas._inv = (px, py) => [(px - ox) / sc, (py - top) / sc];
+  drawRinkLines(ctx, tf, F, S, false);
+  if (opts.richtung && !opts.mini) {
+    ctx.fillStyle = S.text; ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'top';
+    const r = opts.richtung === 'rechts';
+    ctx.textAlign = 'left'; ctx.fillText(r ? 'Tor VfB' : 'Tor Gegner', ox + 2, 2);
+    ctx.textAlign = 'right'; ctx.fillText(r ? 'Tor Gegner' : 'Tor VfB', ox + F.laenge * sc - 2, 2);
+    ctx.textAlign = 'center'; ctx.fillText(r ? 'Angriff VfB →' : '← Angriff VfB', w / 2, 2);
+  }
+  for (const p of opts.punkte || []) {
+    const [x, y] = tf(p.x / 100 * F.laenge, p.y / 100 * F.breite);
+    drawShotMarker(ctx, x, y, p.erg, opts.mini ? 3 : 6, S, false);
+  }
+}
+
+// Klick auf die Skizze → { x, y } in Prozent der Feldmaße (gerundet auf 0,1)
+function rinkClick(canvas, e) {
+  if (!canvas._inv) return null;
+  const F = feldMass(), b = canvas.getBoundingClientRect();
+  const [X, Y] = canvas._inv(e.clientX - b.left, e.clientY - b.top);
+  const pc = (v, max) => Math.round(Math.max(0, Math.min(100, v / max * 100)) * 10) / 10;
+  if (X < -1 || Y < -1 || X > F.laenge + 1 || Y > F.breite + 1) return null; // deutlich außerhalb der Bande
+  return { x: pc(X, F.laenge), y: pc(Y, F.breite) };
+}
+
+// ---------- Erfassen und Nachtragen ----------
+let ortPick = null;     // offene Skizze { id, team, t, back: { time, playing } | null, nachtragen: Filter | null }
+let ortNachtrag = null; // Nachtragen: Video läuft bis zum Schuss { id, at, filter }
+let ortFilter = 'alle'; // 'alle' | 'ulm' | 'gegner'
+
+function ortNeeded(team, erg) {
+  if (!feat('schussort')) return false;
+  const a = ortAbfrage();
+  return a === 'alle' || (a === 'eigene' && (team === 'ulm' || erg === 'tor')) || (a === 'tore' && erg === 'tor');
+}
+
+// Nach einer Schusseingabe: Skizze öffnen, wenn die Abfrage-Stufe es verlangt
+function maybeAskOrt(id, erg) {
+  const ev = events.find(e => e.id === id);
+  if (!ev || ev.ort || !ortNeeded(shotTeam(ev), erg)) return;
+  openOrtPick(id);
+}
+
+function openOrtPick(id, nachtragen = null) {
+  const ev = events.find(e => e.id === id);
+  if (!ev) return;
+  const t = shotTimeOf(ev);
+  ortNachtrag = null;
+  const back = nachtragen ? null : { time: getTime(), playing: isPlaying() };
+  pause();
+  if (state.file) seekTo(t); // Standbild beim Schuss
+  ortPick = { id, team: shotTeam(ev), t, back, nachtragen };
+  focusControlWindow();
+  flash('Schussort: Klick auf die Skizze · Esc unbekannt');
+  renderOrtPanel();
+}
+
+// ort: { x, y } = setzen, null = entfernen, undefined = unverändert (unbekannt/überspringen).
+// abbruch: Esc – beim Nachtragen endet es dort.
+function closeOrtPick(ort, abbruch = false) {
+  const p = ortPick;
+  if (!p) return;
+  ortPick = null;
+  const ev = events.find(e => e.id === p.id);
+  if (ev && ort !== undefined) {
+    const upd = { ...ev };
+    if (ort) upd.ort = ort; else delete upd.ort;
+    replaceEvent(upd);
+    if (ort) { showOrtLast(upd); flash('Ort: ' + ortText(shotGeo(ort, p.t, p.team))); }
+  }
+  renderOrtPanel();
+  if (p.nachtragen && !abbruch) { nextOrtOffen(p.t, p.nachtragen); return; }
+  if (p.back && state.file) { seekTo(p.back.time); if (p.back.playing) play(); }
+}
+
+function ortOffen(filter = ortFilter) {
+  const all = shotList().filter(s => filter === 'alle' || s.team === filter);
+  return { offen: all.filter(s => !s.ort), gesamt: all.length };
+}
+
+// Nachtragen: 3 s vor den nächsten Schuss ohne Ort springen, bis zum Schuss spielen, dann die Skizze
+function nextOrtOffen(t, filter = ortFilter) {
+  const { offen } = ortOffen(filter);
+  if (!offen.length) {
+    ortNachtrag = null;
+    renderOrtPanel();
+    notice(`Alle ${filter === 'ulm' ? 'eigenen Schüsse' : filter === 'gegner' ? 'Gegnerschüsse' : 'Schüsse'} haben einen Ort.`);
+    flash('Alle Orte erfasst');
+    return;
+  }
+  const s = offen.find(s => s.time > t + 0.01) || offen[0];
+  if (!state.file) { openOrtPick(s.ev.id, filter); return; }
+  seekTo(Math.max(0, s.time - 3));
+  ortNachtrag = { id: s.ev.id, at: s.time, filter };
+  play();
+  renderOrtPanel();
+}
+
+function ortNachtragTick() {
+  if (ortNachtrag && !ortPick && getTime() >= ortNachtrag.at - 0.05) openOrtPick(ortNachtrag.id, ortNachtrag.filter);
+}
+
+// Tasten bei offener Skizze: Esc/Rücktaste unbekannt, Enter überspringen, ←/→ und Frame-Schritt spulen,
+// alles andere (Ziffern, Buchstaben, Leertaste, Tempo) wirkt nicht. true = Taste verbraucht.
+function ortKey(e) {
+  const k = e.key;
+  if (!ortPick) {
+    if (ortNachtrag && (k === 'Escape' || k === 'Backspace')) {
+      e.preventDefault(); ortNachtrag = null; renderOrtPanel(); flash('Nachtragen beendet'); return true;
+    }
+    return false;
+  }
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'z') { closeOrtPick(undefined, true); return false; } // Rückgängig wirkt danach
+  e.preventDefault();
+  const seek = k === 'ArrowLeft' || k === 'ArrowRight' || (e.shiftKey && !VIDEO_KEYS[k] && videoKey(e));
+  if (seek) { videoKey(e).run(e); return true; }
+  if (e.repeat) return true;
+  if (k === 'Escape' || k === 'Backspace') closeOrtPick(undefined, true);
+  else if (k === 'Enter') closeOrtPick(undefined);
+  return true;
+}
+
+function showOrtLast(ev) {
+  const box = $('ortLast');
+  if (!box) return;
+  const t = shotTimeOf(ev);
+  box.hidden = false;
+  box.textContent = '';
+  const c = h('canvas', { class: 'ortMini' });
+  box.append(c, h('span', null, `${fmtTime(t, true)} · Schussort ${shotTeam(ev) === 'ulm' ? 'eigener Schuss' : 'Gegner'}: ` +
+    ortText(shotGeo(ev.ort, t, shotTeam(ev)))));
+  drawFullRink(c, { punkte: [{ ...ev.ort, erg: shotErgOf(ev) }], mini: true, breite: 76 });
+}
+
+const ORT_FILTER = [['alle', 'alle'], ['ulm', 'eigene'], ['gegner', 'Gegner']];
+
+function renderOrtPanel() {
+  const panel = $('ortPanel'), tools = $('ortTools');
+  if (!panel) return;
+  const on = feat('schussort');
+  if (!on) { ortPick = null; ortNachtrag = null; $('ortLast').hidden = true; }
+  panel.hidden = !(ortPick || ortNachtrag);
+  $('field').hidden = !!ortPick;
+  panel.textContent = '';
+  if (ortPick) {
+    const p = ortPick, ev = events.find(e => e.id === p.id);
+    const n = drittelAt(p.t).nummer, r = richtungAt(p.t);
+    const canvas = h('canvas', { class: 'ortCanvas', title: 'Klick: Schussort (Kamerasicht)' });
+    canvas.addEventListener('click', e => { const o = rinkClick(canvas, e); if (o) closeOrtPick(o); });
+    const off = p.nachtragen ? ortOffen(p.nachtragen) : null;
+    panel.append(
+      h('div', { class: 'ortHead' },
+        h('strong', null, `Schussort${BETA}: ${p.team === 'ulm' ? 'eigener Schuss' : 'Gegnerschuss'} ${fmtTime(p.t, true)}`),
+        h('span', { class: 'ortHint' }, 'Klick auf den Ort (so, wie die Kamera es zeigt) · Esc = unbekannt' +
+          (p.nachtragen ? ' und Nachtragen beenden · Enter = überspringen' : '') + ' · ← → spulen')),
+      n ? h('div', { class: 'ortDir' }, `Angriff VfB im ${periodLabel(n)}: `,
+          ...['links', 'rechts'].map(v => h('button', { type: 'button', class: r === v ? 'active' : null, onclick: () => setRichtung(n, v) },
+            v === 'links' ? '← links' : 'rechts →')),
+          r ? null : h('span', { class: 'warnText' }, 'Richtung fehlt – bitte wählen (der Ort wird trotzdem gespeichert).'))
+        : h('div', { class: 'ortDir warnText' }, 'Vor dem ersten Drittel – ohne Angriffsrichtung nicht auswertbar.'),
+      canvas,
+      h('div', { class: 'ortBtns' },
+        h('button', { type: 'button', onclick: () => closeOrtPick(undefined, true) }, h('kbd', null, 'Esc'), 'unbekannt'),
+        p.nachtragen ? h('button', { type: 'button', onclick: () => closeOrtPick(undefined) }, h('kbd', null, 'Enter'), 'überspringen') : null,
+        ev && ev.ort ? h('button', { type: 'button', onclick: () => closeOrtPick(null) }, 'Ort entfernen') : null,
+        off ? h('span', { class: 'ortHint' }, `Nachtragen: noch ${off.offen.length} von ${off.gesamt} offen`) : null));
+    drawFullRink(canvas, { punkte: ev && ev.ort ? [{ ...ev.ort, erg: shotErgOf(ev) }] : [], richtung: r });
+    panel.scrollIntoView({ block: 'nearest' });
+  } else if (ortNachtrag) {
+    panel.append(h('strong', null, `Schussort nachtragen${BETA}: `), `Video läuft bis zum Schuss bei ${fmtTime(ortNachtrag.at, true)} … `,
+      h('span', { class: 'ortHint' }, 'Esc beendet'));
+  }
+  if (!tools) return;
+  tools.textContent = '';
+  if (on) {
+    const { offen, gesamt } = ortOffen(ortFilter);
+    tools.append(
+      h('button', { title: 'Springt 3 s vor den nächsten Schuss ohne Ort, spielt bis zum Schuss und öffnet die Skizze',
+        onclick: () => capture(t => nextOrtOffen(t)) }, h('kbd', null, ORT_KEY.toUpperCase()), `Nächster Schuss ohne Ort${BETA}`),
+      selectEl(ORT_FILTER, ortFilter, v => { ortFilter = v; renderOrtPanel(); }),
+      h('span', { class: 'ortHint' }, gesamt ? `noch ${offen.length} von ${gesamt} offen` : 'noch keine Schüsse'));
+  }
+}
+
+// Plausibilität Schussort (ganzes Spiel)
+function ortChecks() {
+  const list = shotList(), out = [];
+  if (ortAbfrage() === 'aus' && !list.some(s => s.ort)) return out;
+  const jump = s => ({ t0: s.time, t1: s.time });
+  for (const [team, dat, nom] of [['ulm', 'eigenen Schüssen', 'eigenen Schüsse'], ['gegner', 'Gegnerschüssen', 'Gegnerschüsse']]) {
+    const all = list.filter(s => s.team === team), ohne = all.filter(s => !s.ort);
+    out.push(ohne.length
+      ? { ok: false, text: `${ohne.length} von ${all.length} ${dat} ohne Ort${BETA} (Nachtragen: Taste L) – erster:`, jumps: [jump(ohne[0])] }
+      : { ok: true, text: `Alle ${all.length} ${nom} haben einen Ort${BETA}.` });
+  }
+  const ohneR = list.filter(s => s.geo && s.geo.ohneRichtung);
+  if (ohneR.length) {
+    const nums = [...new Set(ohneR.map(s => drittelAt(s.time).nummer))];
+    out.push({ ok: false, text: `${ohneR.length} Schuss/Schüsse mit Ort, aber ohne Angriffsrichtung (${nums.map(n => n ? periodLabel(n) : 'vor dem 1. Drittel').join(', ')}) – ` +
+      `im Setup oder am Drittelbeginn eintragen${BETA}:`, jumps: [jump(ohneR[0])] });
+  }
+  const byP = {};
+  for (const s of list) {
+    if (!s.geo || !s.geo.zone) continue;
+    const n = drittelAt(s.time).nummer, o = byP[n] || (byP[n] = { mitOrt: 0, eigen: [] });
+    o.mitOrt++;
+    if (s.geo.zone === 'eigen') o.eigen.push(s);
+  }
+  for (const [n, o] of Object.entries(byP)) {
+    if (!o.eigen.length) continue;
+    const vertauscht = o.eigen.length >= KZ.RICHTUNG_MIN && o.eigen.length > o.mitOrt / 2;
+    out.push({ ok: false, text: vertauscht
+      ? `${periodLabel(+n)}: ${o.eigen.length} von ${o.mitOrt} Schüssen mit Ort aus der eigenen Hälfte des Schützen – Angriffsrichtung vermutlich vertauscht${BETA} (Setup oder Drittel-Ereignis):`
+      : `${periodLabel(+n)}: ${o.eigen.length} Schuss/Schüsse aus der eigenen Hälfte des Schützen – Angriffsrichtung prüfen?${BETA}`,
+      jumps: o.eigen.map(jump) });
+  }
+  return out;
+}
+
 function actGoal(typ, t) {
   const ev = { typ, time: t, aufDemFeld: onFieldIds(lineupAt(t)) };
   let text = typ === 'tor' ? 'TOR Ulm' : 'Gegentor';
@@ -1592,6 +2055,11 @@ function actGoal(typ, t) {
     }
   }
   record(ev, text);
+  // Schussort (Experiment): Gegentor – der Ort gehört zum Gegnerschuss ±3 s, falls einer erfasst ist
+  if (typ === 'gegentor' && feat('schussort')) {
+    const x = oppAttempts().find(x => x.torEv && x.torEv.id === ev.id);
+    maybeAskOrt(x ? x.ev.id : ev.id, 'tor');
+  }
 }
 
 // n-tes Ulmer Tor im Bericht für ein Tor zur Videozeit t (n = Anzahl erfasster Tore davor + 1)
@@ -1628,7 +2096,12 @@ async function actPeriod(t) {
   const wasPlaying = isPlaying();
   pause();
   focusControlWindow();
-  const reihen = await lineupDialog(`Besetzung für das ${periodLabel(nummer)} (Beginn bei ${fmtTime(t, true)})`, reihenAt(t));
+  // Schussort (Experiment): Angriffsrichtung mit abfragen, Vorschlag = gewechselt gegenüber dem vorigen Drittel
+  const rr = game.richtung || {};
+  const rOpt = feat('schussort') ? { nummer, value: rr[richtungKey(nummer)] || gegenRichtung(rr[richtungKey(nummer - 1)]) } : null;
+  const res = await lineupDialog(`Besetzung für das ${periodLabel(nummer)} (Beginn bei ${fmtTime(t, true)})`, reihenAt(t), rOpt);
+  const reihen = rOpt ? res && res.reihen : res;
+  if (reihen && rOpt && res.richtung) setRichtung(nummer, res.richtung);
   if (reihen) {
     const evs = [
       { typ: 'drittel', time: t, nummer, art: 'beginn' },
@@ -1821,6 +2294,7 @@ for (const a of D1_ACTIONS) D1_KEYS[a.key] = a.run;
 
 function capture(run) {
   if (!state.file) { notice('Bitte zuerst das Spielvideo wählen.', 'warn'); return; }
+  if (ortPick) { flash('Erst Schussort wählen (Esc = unbekannt)'); return; }
   run(captureTime());
 }
 
@@ -1938,6 +2412,7 @@ function saveChain(ende, schussErgebnis, tEnde) {
   chain = emptyChain();
   addEvent(ev, { chainBefore: before });
   flash(codeLabel(END_CODES, ende) + (schussErgebnis ? ': ' + codeLabel(SHOT_RESULTS, schussErgebnis) : ''));
+  if (ende === 'schuss') maybeAskOrt(ev.id, schussErgebnis); // Schussort (Experiment)
 }
 
 function chainCancelShot() {
@@ -2133,12 +2608,19 @@ function focusControlWindow() {
 
 // Dialog „Besetzung für dieses Drittel“: alle Reihen, vorausgefüllt, Enter übernimmt.
 // Liefert { key: { slots, bully, ohneTorwart } } oder null bei Abbruch. Das Setup bleibt unverändert.
-function lineupDialog(title, vorlage) {
+// richtungOpt (Schussort, Experiment): { nummer, value } – dann zusätzlich „Angriff VfB“ (← → wählt)
+// und das Ergebnis ist { reihen, richtung }.
+function lineupDialog(title, vorlage, richtungOpt) {
   return new Promise(resolve => {
     const dlg = $('dlg');
     dlg.textContent = '';
     dlg.classList.add('wide');
     let result = null;
+    let richtung = richtungOpt ? richtungOpt.value || null : null;
+    const dirBtns = richtungOpt ? ['links', 'rechts'].map(v => h('button', { type: 'button', 'data-v': v,
+      onclick: () => setDir(v) }, v === 'links' ? '← links' : 'rechts →')) : [];
+    const setDir = v => { richtung = v; for (const b of dirBtns) b.classList.toggle('active', b.dataset.v === v); };
+    setDir(richtung);
 
     const data = {};
     for (const l of LINES) {
@@ -2183,18 +2665,24 @@ function lineupDialog(title, vorlage) {
       h('h3', null, title),
       h('p', { class: 'hint' }, 'Vorausgefüllt mit der Besetzung des vorherigen Drittels. ' +
         'Änderungen gelten ab diesem Drittel; das Setup bleibt unverändert.'),
+      richtungOpt ? h('div', { class: 'ortDir', style: 'margin:0 0 10px' },
+        h('strong', null, `Angriff VfB im ${periodLabel(richtungOpt.nummer)} (Kamerasicht)${BETA}: `), ...dirBtns,
+        h('span', { class: 'ortHint' }, richtungOpt.value ? 'Vorschlag: gewechselt gegenüber dem vorigen Drittel · ← → ändern' : '← → wählen (für den Schussort)')) : null,
       grid,
       h('div', { class: 'dlgBtns' },
         h('button', { type: 'button', onclick: () => dlg.close() }, 'Abbrechen'),
         ok));
     form.addEventListener('submit', e => {
       e.preventDefault();
-      result = data;
+      result = richtungOpt ? { reihen: data, richtung } : data;
       dlg.close();
     });
     // Enter übernimmt auch, wenn gerade eine Auswahlliste den Fokus hat.
     dlg.onkeydown = e => {
       if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') { e.preventDefault(); form.requestSubmit(); }
+      if (richtungOpt && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.target.tagName !== 'SELECT') {
+        e.preventDefault(); setDir(e.key === 'ArrowLeft' ? 'links' : 'rechts');
+      }
     };
 
     dlg.append(form);
@@ -2309,6 +2797,10 @@ async function editEvent(id) {
         { name: 'nummer', label: 'Drittel', type: 'select',
           options: [['1', '1. Drittel'], ['2', '2. Drittel'], ['3', '3. Drittel'], ['4', 'Verlängerung']], value: String(ev.nummer) },
         { name: 'art', label: 'Art', type: 'select', options: [['beginn', 'Beginn'], ['ende', 'Ende']], value: ev.art });
+      if (feat('schussort')) fields.push(
+        { name: 'richtung', label: 'Angriff VfB (Kamerasicht)' + BETA, type: 'select', when: v => v.art === 'beginn',
+          options: [['', '– unbekannt –'], ['rechts', 'rechts →'], ['links', '← links']], value: (game.richtung || {})[richtungKey(ev.nummer)] || '' },
+        { type: 'info', text: 'Die Richtung gilt für das ganze Drittel (gespeichert im Spiel, nicht im Ereignis); alle Schusskarten passen sich sofort an.' });
       break;
     case 'ballbesitz':
       fields[0].label = 'Beginn (Videozeit)';
@@ -2362,7 +2854,7 @@ async function editEvent(id) {
       if (feat('gegnerschussErgebnis')) {
         if (v.ergebnis === 'tor') {
           // wird zum Gegentor (ein Ereignis, wie bei Taste 1 nach X)
-          replaceEvent({ id: ev.id, typ: 'gegentor', time: upd.time, aufDemFeld: onFieldIds(lineupAt(upd.time)) });
+          replaceEvent({ id: ev.id, typ: 'gegentor', time: upd.time, aufDemFeld: onFieldIds(lineupAt(upd.time)), ...(ev.ort ? { ort: ev.ort } : {}) });
           return;
         }
         if (v.ergebnis) upd.ergebnis = v.ergebnis; else delete upd.ergebnis;
@@ -2388,7 +2880,14 @@ async function editEvent(id) {
       return;
     }
     case 'markierung': Object.assign(upd, markFromForm(v)); break;
-    case 'drittel': upd.nummer = +v.nummer; upd.art = v.art; break;
+    case 'drittel':
+      upd.nummer = +v.nummer; upd.art = v.art;
+      if (feat('schussort') && v.art === 'beginn') {
+        const r = { ...(game.richtung || {}) };
+        if (v.richtung) r[richtungKey(upd.nummer)] = v.richtung; else delete r[richtungKey(upd.nummer)];
+        game.richtung = r; // replaceEvent speichert und zeichnet neu
+      }
+      break;
     case 'unterbrechung': upd.grund = v.grund; upd.art = v.art; break;
   }
   replaceEvent(upd);
@@ -2983,6 +3482,8 @@ function handleKey(e) {
   if (e.key === 'Escape') closeBench();
   if (document.querySelector('dialog[open]')) return; // Dialog bedient seine Tasten selbst
   if (isTextInput(e.target)) return;
+  // Schussort-Skizze offen: nur ihre Tasten (Esc, Enter, Spulen); Strg+Z schließt sie und wirkt dann
+  if ((ortPick || ortNachtrag) && ortKey(e)) return;
 
   // Playlist offen: N/V/Esc steuern die Szenen, Videotasten wirken weiter, Erfassungstasten sind aus
   if (playlist.open && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -3034,8 +3535,10 @@ function handleKey(e) {
     }
     const nachtrag = session.durchgang === 1 && key === NACHTRAG_KEY && feat('gegnerschussErgebnis') ? t => nextOppOffen(t) : null;
     const mark = key === MARK_KEY && feat('markierungen') ? actMark : null; // M: in beiden Durchgängen
+    const ortNext = key === ORT_KEY && feat('schussort') ? t => nextOrtOffen(t) : null; // L: in beiden Durchgängen
     const run = key === 'o' ? actPause // Unterbrechung: in beiden Durchgängen
       : mark ? mark
+      : ortNext ? ortNext
       : nachtrag || (session.durchgang === 2 ? d2Action(key) : D1_KEYS[key]);
     if (run) {
       e.preventDefault();
@@ -3155,10 +3658,43 @@ function renderGameInfo() {
         oninput: e => { game.verlaengerungMin = e.target.value === '' ? null : +e.target.value; persist(); } })),
       h('p', { class: 'hint' }, 'Drittellänge und Verlängerung dienen der geschätzten Spielzeit (Auswertung). Leeres Feld = ohne Schätzung (Faktor 1).'),
     ] : []),
+    // Schalter schussort: im Standard ausgeblendet, Werte bleiben gespeichert
+    ...(feat('schussort') ? renderOrtSetup() : []),
     h('p', { class: 'hint' }, game.video
       ? `Video: ${game.video.name} (${fmtSize(game.video.size)}, ${fmtTime(game.video.duration)})`
       : 'Noch kein Video zugeordnet.'),
   );
+}
+
+// Setup Schussort (β): Abfrage-Stufe, Feldmaße des Spielmodus, Angriffsrichtung je Drittel
+function renderOrtSetup() {
+  const m = game.modus, F = feldMass(m), D = FELD[m];
+  const setMass = (k, v) => {
+    const cur = { ...((game.feld || {})[m] || {}) };
+    const num = parseFloat(String(v).replace(',', '.'));
+    if (isFinite(num) && num > 5 && num < 80 && num !== D[k]) cur[k] = num; else delete cur[k];
+    const all = { ...(game.feld || {}) };
+    if (Object.keys(cur).length) all[m] = cur; else delete all[m];
+    game.feld = all;
+    if (!Object.keys(all).length) delete game.feld;
+    persist();
+  };
+  const massInput = k => h('input', { type: 'number', min: 10, max: 60, step: 0.5, value: F[k], style: 'width:70px',
+    oninput: e => setMass(k, e.target.value) });
+  const dirSel = n => selectEl([['', '–'], ['rechts', 'rechts →'], ['links', '← links']], (game.richtung || {})[richtungKey(n)] || '',
+    v => setRichtung(n, v || null));
+  return [
+    labeled('Schussort abfragen' + expMark('schussort'), selectEl(ORT_ABFRAGE, ortAbfrage(), v => {
+      if (v === 'aus') delete game.schussortAbfrage; else game.schussortAbfrage = v;
+      persist(); renderOrtPanel();
+    })),
+    labeled(`Feld ${m} (m)${expMark('schussort')}`, h('span', { class: 'row' }, massInput('laenge'), ' × ', massInput('breite'))),
+    labeled('Angriff VfB (Kamerasicht)' + expMark('schussort'), h('span', { class: 'row' },
+      ...[1, 2, 3, 4].flatMap(n => [h('span', { class: 'hint' }, n <= 3 ? `${n}.` : 'V'), dirSel(n)]))),
+    h('p', { class: 'hint' }, `Schussort: Klick auf eine Feldskizze nach dem Schuss (eigene: nach E und Ergebnis, Gegner: nach X und Ergebnis bzw. H). ` +
+      `Nachtragen mit Taste L. Die Angriffsrichtung wird beim Drittelbeginn (D) abgefragt; Änderungen wirken sofort auf alle Schusskarten. ` +
+      `Feldmaße: Vorgabe ${D.laenge} × ${D.breite} m (${m}), werden mit der Vorlage gespeichert.`),
+  ];
 }
 
 function setModus(m) {
@@ -3400,7 +3936,7 @@ function saveTemplate() {
   const tpls = loadTemplates();
   if (tpls[name] && !confirm(`Vorlage „${name}“ überschreiben?`)) return;
   tpls[name] = clone({ modus: game.modus, kader: game.kader, reihen: game.reihen, torwartStart: game.torwartStart,
-    formationen: game.formationen });
+    formationen: game.formationen, schussortAbfrage: game.schussortAbfrage, feld: game.feld });
   storeTemplates(tpls);
   notice(`Vorlage „${name}“ gespeichert.`);
   renderSetup();
@@ -3421,6 +3957,9 @@ function loadTemplate(name) {
   game.formationen = n.formationen;
   game.reihen = n.reihen;
   game.torwartStart = n.torwartStart || null;
+  // Schussort-Abfrage und Feldmaße kommen aus der Vorlage (fehlen sie dort: aus bzw. Vorgabe)
+  if (data.schussortAbfrage && data.schussortAbfrage !== 'aus') game.schussortAbfrage = data.schussortAbfrage; else delete game.schussortAbfrage;
+  if (data.feld) game.feld = data.feld; else delete game.feld;
   persist();
   notice(`Vorlage „${name}“ geladen.`);
   renderAll();
@@ -3709,7 +4248,7 @@ function newGameAction() {
     `Die ${events.length} Ereignisse des aktuellen Spiels werden aus dem Browser gelöscht ` +
     '(vorher „Sicherung exportieren“!). Kader und Reihen bleiben erhalten.')) return;
   const keep = clone({ modus: game.modus, kader: game.kader, reihen: game.reihen, torwartStart: game.torwartStart,
-    formationen: game.formationen });
+    formationen: game.formationen, schussortAbfrage: game.schussortAbfrage, feld: game.feld }); // wie die Vorlage: ohne Spielrichtung
   game = Object.assign(newGame(), keep);
   events = [];
   chain = emptyChain();
@@ -3772,10 +4311,12 @@ function setDurchgang(n) {
   $('d1Panel').hidden = n !== 1;
   $('d2Panel').hidden = n !== 2;
   oppPick = null; // offene Ergebnisauswahl (Durchgang 1) schließen
+  ortPick = null; ortNachtrag = null; // offene Schussort-Skizze schließen
   closeBench();
   saveSession();
   refreshLive(true);
   renderChain();
+  renderOrtPanel();
 }
 
 let liveSig = '';
@@ -3858,13 +4399,15 @@ function renderEvents() {
   if (optMark) optMark.hidden = !feat('markierungen');
   if (!feat('markierungen') && $('evFilter').value === 'markierung') $('evFilter').value = 'alle';
   const f = $('evFilter').value || 'alle';
+  // Schussort (Experiment): Ereignisse, die den Ort eines Schussversuchs tragen
+  const ortIds = feat('schussort') ? new Set([...ownShots(), ...oppAttempts()].map(x => x.ev.id)) : null;
   let n = 0;
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i];
     if (f !== 'alle' && TYPES[ev.typ].group !== f) continue;
     if (ev.typ === 'markierung' && !feat('markierungen')) continue; // gespeichert, im Standardmodus unsichtbar
     n++;
-    list.append(eventRow(ev));
+    list.append(eventRow(ev, ortIds));
   }
   const sichtbar = feat('markierungen') ? events.length : events.filter(e => e.typ !== 'markierung').length;
   $('evCount').textContent = f === 'alle' ? `${n}` : `${n} von ${sichtbar}`;
@@ -3872,14 +4415,20 @@ function renderEvents() {
     events.length ? 'Keine Ereignisse für diesen Filter.' : 'Noch keine Ereignisse.'));
 }
 
-function eventRow(ev) {
+function eventRow(ev, ortIds) {
   const T = TYPES[ev.typ];
   const label = ev.typ === 'bully' ? (ev.gewonnen ? 'Bully +' : 'Bully −') : T.label;
-  return h('div', { class: 'ev ' + T.cls, title: 'Klick: 3 s vor das Ereignis springen',
+  const ortBtn = !ortIds ? null : ortIds.has(ev.id)
+    ? h('button', { class: 'icon' + (ev.ort ? ' ortOn' : ''),
+        title: ev.ort ? `Schussort${BETA}: ${ortText(shotGeo(ev.ort, shotTimeOf(ev), shotTeam(ev)))} – Klick: ändern (Skizze)` : `Schussort setzen${BETA} (Skizze)`,
+        onclick: e => { e.stopPropagation(); openOrtPick(ev.id); } }, ev.ort ? '⌖' : '◌')
+    : h('span');
+  return h('div', { class: 'ev ' + T.cls + (ortIds ? ' o6' : ''), title: 'Klick: 3 s vor das Ereignis springen',
     onclick: () => seekTo(ev.time - 3) },
     h('span', { class: 'evTime' }, fmtTime(ev.time, true)),
     h('span', { class: 'evType' }, label),
     h('span', { class: 'evDetail', title: describe(ev) }, describe(ev)),
+    ortBtn,
     h('button', { class: 'icon', title: 'Bearbeiten',
       onclick: e => { e.stopPropagation(); editEvent(ev.id); } }, '✎'),
     h('button', { class: 'icon', title: 'Löschen (Strg+Z macht es rückgängig)',
@@ -4954,6 +5503,9 @@ function plausibility(st) {
   if (ohneBully.length) out.push({ ok: false, text: `${ohneBully.length} Tor(e)/Gegentor(e) ohne Bully innerhalb von 3 min` +
     (feat('autoTorPause') ? ' (Zeit bis zum Anspiel wird dann nicht als Stillstand abgezogen):' : ':'),
     jumps: ohneBully.map(e => ({ t0: e.time, t1: e.time })) });
+
+  // Schussort (Experiment): fehlende Orte, fehlende Richtung, Schüsse aus der eigenen Hälfte
+  if (feat('schussort')) out.push(...ortChecks());
 
   // Ergebnis der Gegnerschüsse (Experiment)
   if (feat('gegnerschussErgebnis')) {
@@ -6928,6 +7480,7 @@ function renderAll() {
   renderEvents();
   refreshLive(true);
   renderChain();
+  renderOrtPanel();
   updateUI();
 }
 
@@ -7022,6 +7575,7 @@ setInterval(() => {
   updateUI();
   refreshLive(false);
   playlistTick();
+  ortNachtragTick();
   if (session.durchgang === 2 && !chainActive()) {
     const pre = preselectStart(getTime()); // Vorauswahl hängt von der Videozeit ab
     if (pre !== lastPreselect) { lastPreselect = pre; renderChain(); }
