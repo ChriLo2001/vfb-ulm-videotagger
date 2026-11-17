@@ -86,7 +86,7 @@ Oben rechts **„Standard“ / „Experiment“** (Standard ist voreingestellt, 
 
 Zurzeit experimentell: Erweiterte Kennzahlen, geschätzte Spielzeit (Drittellänge), automatische
 Tor-Pause, Szenen per Klick und Clip-Export, Stichprobe n, Kennzahlen im Excel, Ergebnis und Blocker
-bei Gegnerschüssen. Neue Funktionen
+bei Gegnerschüssen, lose Bälle, Ballsicherheit, Szenen markieren, Reaktionsausgleich. Neue Funktionen
 kommen immer zuerst in den Experimentmodus.
 
 ## Setup vor dem Spiel
@@ -119,8 +119,11 @@ Ziel: Wer stand wann auf dem Feld, und was waren die großen Ereignisse.
 - **Drittel:** `D` beim Anpfiff öffnet den Dialog „Besetzung für dieses Drittel“
   (vorausgefüllt, Enter übernimmt). Hier trägst du Aushelfer ein, wenn jemand in zwei Reihen
   spielt. `D` am Drittelende beendet das Drittel. **Erst `D`, dann die Reihe drücken.**
-- **Reihenwechsel:** `1` `2` `3`, Überzahl `4`, Unterzahl `5`, Spezial `6`. Einzelne Spieler
-  tauschen: Rechtsklick auf den Spielerbutton.
+- **Reihenwechsel:** `1` `2` `3`, Überzahl `4`, Unterzahl `5`, Spezial `6`, zweite Überzahl
+  `7` (ÜZ 2), zweite Unterzahl `8` (UZ 2). ÜZ 2 und UZ 2 legst du bei Bedarf im Setup über
+  „+ zweite ÜZ-/UZ-Reihe“ an; erst dann sind Knopf und Taste aktiv. In der Auswertung erscheinen
+  sie als eigene Zeilen, alle Über-/Unterzahl-Werte fassen beide Reihen zusammen. Einzelne
+  Spieler tauschen: Rechtsklick auf den Spielerbutton.
 - **Gegnerschuss** `X` (jeder Schussversuch, auch geblockt oder vorbei), **Gegentor** `H`,
   **Tor** `J`. Bei Toren speichert das Tool, wer auf dem Feld stand (Plus/Minus).
 - **Ergebnis des Gegnerschusses** (β, nur im Experimentmodus): nach `X` erscheint eine Auswahl,
@@ -132,6 +135,14 @@ Ziel: Wer stand wann auf dem Feld, und was waren die großen Ereignisse.
   danach geht es automatisch weiter („noch x von y offen“). So lassen sich ältere Spiele in
   wenigen Minuten ergänzen.
 - **Bully** gewonnen `B` / verloren `N`, **Strafe** `P`.
+- **Penalty** (Strafschuss): ebenfalls über `P`, im Dialog Art „Penalty“ wählen. Angaben: für wen,
+  Schütze, Torwart (bei Gegner-Penalty unser Torwart, vorbelegt), Ergebnis Tor / gehalten /
+  vorbei. Das Tool startet automatisch eine Unterbrechung „PENALTY“ (keine Eiszeit), die beim
+  nächsten Bully (`B`/`N`) endet, und legt bei Tor das Tor bzw. Gegentor an. Penalty-Tore zählen
+  für den Spielstand, aber nicht für Plus/Minus, Corsi und die Reihe auf dem Feld.
+- **Szene markieren** `M` (β, nur im Experimentmodus): in beiden Durchgängen, ohne Dialog, das
+  Video läuft weiter. Kategorie (Lehrszene, Social Media, Tor/Chance, Sonstiges) und Notiz später
+  in der Ereignisliste.
 - **Unterbrechung** `O` (Timeout, Verletzung, Sonstiges), nochmal `O` beendet sie. Die Zeit
   zählt nicht als Eiszeit. Im Experimentmodus (β) zieht das Tool die Zeit zwischen Tor und
   Anspiel zusätzlich automatisch ab.
@@ -156,13 +167,24 @@ Beispiel: Ballgewinn durch den linken Verteidiger, über Flügel und Top zum Sch
 
 | Bereich | Tasten |
 |---|---|
-| Video | Leertaste Play/Pause · `←` `→` 2 s · Umschalt + `←` `→` 10 s · `,` `.` Tempo |
-| Durchgang 1 | `D` Drittel · `1`–`6` Reihen · `X` Gegnerschuss · `H` Gegentor · `J` Tor · `B`/`N` Bully · `P` Strafe |
+| Video | Leertaste Play/Pause · `←` `→` 2 s · Umschalt + `←` `→` 10 s · `,` `.` Tempo (0,5× bis 4×) · Umschalt + `,` `.` ein Frame zurück/vor |
+| Durchgang 1 | `D` Drittel · `1`–`6` Reihen · `7` ÜZ 2 · `8` UZ 2 · `X` Gegnerschuss · `H` Gegentor · `J` Tor · `B`/`N` Bully · `P` Strafe oder Penalty |
 | Durchgang 1 (β) | nach `X`: `1` Tor · `2` gehalten · `3` geblockt (dann Blocker per Positionstaste, `0` anderer) · `4` vorbei · `Enter` unbekannt · `K` nächster Gegnerschuss ohne Ergebnis |
 | Durchgang 2 | `1`–`6` Spieler nach Position · `0` anderer Spieler · `A S D F G` Start · `Q W E R T` Ende · nach `E`: `1`–`4` Schussergebnis |
 | Immer | `O` Unterbrechung · `Strg+Z` rückgängig · `Esc` (oder Rücktaste) Kette verwerfen |
+| Immer (β) | `M` Szene markieren |
 | Ein Bildschirm | `Z` Theatermodus an/aus |
 | Playlist (β) | `N` nächste Szene · `V` vorherige · `Esc` schließen |
+
+**Geschwindigkeit:** Hohe Tempi (2,5×, 3×, 4×) sind für Durchgang 1 gedacht; ab 4× ist das Video
+stumm. Bei 3–4× landen Eingaben durch die Reaktionszeit 1–2 s Videozeit zu spät – Wechsel deshalb
+lieber kurz zurückspulen und genau setzen. Im Experimentmodus gibt es neben dem Tempo das Feld
+„Ausgleich β“ (Reaktionszeit in Sekunden, pro Rechner gemerkt, Standard 0): Bei laufendem Video
+zieht das Tool dann Reaktionszeit × Tempo von jeder Eingabe ab.
+
+**Frameweise:** Umschalt + Komma / Umschalt + Punkt springt ein Bild zurück bzw. vor und hält das
+Video an. Die Bildrate erkennt das Tool beim Abspielen mit 1× (Anzeige z. B. „25 fps“ neben dem
+Tempo, bis dahin „30 fps?“).
 
 Spielerbelegung im GF 2-2-1: `1` LV · `2` RV · `3` LF · `4` RF · `5` TOP · `6` Torwart.
 Die Taste steht klein auf jedem Spielerbutton.
@@ -180,6 +202,12 @@ Alle Werte gibt es für das Gesamtspiel und für jedes Drittel einzeln.
 - **Reihenvergleich:** Eiszeit, Schüsse und Gegnerschüsse, Tore, Werte pro 10 Minuten Eiszeit; im
   Experimentmodus pro 10 Minuten geschätzter Spielzeit und weitere Kennzahlen (β)
 - **Passmatrix** (Heatmap) und **Passnetzwerk** pro Reihe
+- **Penaltys:** Übersicht mit Schütze, Torwart und Ergebnis (nur wenn es Penaltys gibt)
+- **Lose Bälle und Rückeroberungen** (β): in Spielertabelle und Reihenvergleich, Rückeroberungen =
+  Ballgewinne + lose Bälle
+- **Ballsicherheit** (β): Ballbilanz = (Ballgewinne + lose Bälle) − (Fehlpässe + Ballverluste),
+  dazu Ballbilanz /10 und Verluste je 10 Ballkontakte (fairer Vergleich für Spieler, die viel am
+  Ball sind). Weggeschlagen und Schüsse zählen nicht als Verlust.
 - **Gegnerschüsse nach Ergebnis** (β): Spielertabelle mit Blocks und zugelassenen Schüssen aufs
   Tor bzw. Fenwick gegen (auf dem Feld); Tabelle „Gegnerschüsse nach Reihe“ (aufs Tor, geblockt,
   vorbei, unbekannt, Anteil aufs Tor, Blockquote, FF / FA / FF %) und „Torhüter“ (Paraden,
@@ -209,7 +237,8 @@ Definitionen stehen in [SPEC.md](SPEC.md), Abschnitt „Kennzahlen – Definitio
 Playlist der zugehörigen Szenen und spielt sie im Videofenster (bzw. im Ein-Bildschirm-Modus im
 eingebetteten Video) ab, mit passendem Vor- und Nachlauf (z. B. Tore 7 s davor,
 3 s danach). Dazu gibt es eine Schnellauswahl „Alle Tore“, „Alle Gegentore“, „Alle Schüsse
-von …“.
+von …“ und „Markierte Szenen“ (mit `M` gesetzt; alle oder je Kategorie, Vor-/Nachlauf 8 s / 4 s,
+pro Markierung änderbar).
 
 Jede Playlist lässt sich exportieren:
 - als **CSV-Schnittliste** (Start, Ende, Beschreibung)

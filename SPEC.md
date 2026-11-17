@@ -119,8 +119,16 @@ Spezifikation hin (insbesondere Zwei-Fenster-Prinzip unter file://).
 | `plausiTorOhneBully` | Standard | Plausibilitätscheck „Tor ohne Bully in 3 min“ (nur Hinweis, keine Zahl) |
 | `gegnerschussErgebnis` | Experiment | Nach X Ergebnis (gehalten/geblockt/vorbei/Tor) und Blocker erfassen, Nachtragen mit K, Bearbeiten in der Ereignisliste; Blocks, On-Field aufs Tor/FA, Tabellen „Gegnerschüsse nach Reihe“ und „Torhüter“, Fenwick für beide Seiten, Plausibilitätschecks, Excel-Zeilen/-Spalten (siehe „Ergebnis von Gegnerschüssen“) |
 
+| `reaktionsausgleich` | Experiment | Feld „Ausgleich β“ (pro Gerät, Standard 0 s): bei laufendem Video wird von der Videozeit jeder Eingabe Reaktionszeit × Tempo abgezogen; Anzeige „Eingaben −x s“ |
+| `loseBaelle` | Experiment | Spalten „Lose Bälle“ und „Rückeroberungen“ (Spielertabelle, Reihenvergleich absolut und /10), Excel-Zeilen und -Spalten |
+| `ballbilanz` | Experiment | Tabelle „Ballsicherheit β“ (Ballgewinne, lose Bälle, Fehlpässe, Ballverluste, Ballbilanz, Ballbilanz /10, Ballkontakte, Verluste je 10 Kontakte), Excel-Zeilen |
+| `markierungen` | Experiment | Taste M / Knopf „Markieren β“, Ereignistyp `markierung`, Filter in der Ereignisliste, Schnellauswahl „Markierte Szenen“ mit Playlist und Export; im Standard gespeichert, aber unsichtbar |
+
 Ebenfalls im Standard (harmlos, ohne Schalter): Bully-Warntext „kein
 Bullyspieler“; Ein-Bildschirm-Modus (unabhängig vom Betriebsmodus).
+Standard seit Update A (17.11.2026), ohne Schalter, weil sie die
+Erfassungsstruktur bzw. nur die Videosteuerung betreffen: Penaltys,
+zweite ÜZ-/UZ-Reihe (ÜZ 2, UZ 2), Tempo bis 4×, Frame-Schritt.
 
 ### Prüfung (27.10.2026)
 - Standard, Sicherung Heidelberg-Mannheim vom 20.10., Excel gegen
@@ -152,7 +160,23 @@ Bullyspieler“; Ein-Bildschirm-Modus (unabhängig vom Betriebsmodus).
 ## Videosteuerung (Tastatur)
 - Leertaste: Play/Pause
 - Pfeil links/rechts: 2 s zurück/vor; mit Umschalt: 10 s
-- Komma / Punkt: Tempo runter/hoch (0,5x · 0,75x · 1x · 1,25x · 1,5x · 2x)
+- Komma / Punkt: Tempo runter/hoch (0,5x · 0,75x · 1x · 1,25x · 1,5x · 2x ·
+  2,5x · 3x · 4x). Ab 4x ist das Video stumm (sonst verzerrter Ton), darunter
+  wieder mit Ton. Hohe Tempi sind für Durchgang 1 gedacht; bei 3–4x landen
+  Eingaben durch die Reaktionszeit 1–2 s Videozeit zu spät, Wechsel deshalb
+  kurz zurückspulen und genau setzen.
+- Umschalt + Komma / Umschalt + Punkt: ein Frame zurück / vor (hält das
+  Video an). Erkannt über `e.code` (Comma/Period), damit es auf der
+  deutschen Tastatur geht (dort liefert Umschalt `;` bzw. `:`); als Ersatz
+  auch über die Zeichen `, ; <` bzw. `. : >` mit Umschalt. Die Bildrate wird
+  beim Abspielen mit 1x per `requestVideoFrameCallback` gemessen und auf die
+  nächstgelegene übliche Rate gerundet (23,976 · 24 · 25 · 29,97 · 30 · 50 ·
+  59,94 · 60, sonst ganzzahlig); bis dahin gilt 30 fps (Anzeige „30 fps?“
+  neben dem Tempo). Gilt im Videofenster und im Ein-Bildschirm-Modus gleich.
+- (Experiment) Reaktionsausgleich: Feld „Ausgleich β“ neben dem Tempo (pro
+  Gerät, Standard 0 s). Bei laufendem Video bekommt jede Eingabe die
+  Videozeit − Reaktionszeit × Tempo; pausiert keine Korrektur. Ist er aktiv,
+  steht „Eingaben −x s“ in der Zeitanzeige.
 - Z: Theatermodus (nur Ein-Bildschirm-Modus, siehe dort)
 - Tempo und Position immer im Steuerfenster sichtbar.
 
@@ -217,7 +241,10 @@ Modus-Umschalter oben: „Durchgang 1“ / „Durchgang 2“.
 
 Tasten in Durchgang 1:
 - 1, 2, 3: Reihe 1/2/3 kommt aufs Feld
-- 4: ÜZ, 5: UZ, 6: Spezial
+- 4: ÜZ, 5: UZ, 6: Spezial, 7: ÜZ 2, 8: UZ 2 (zweite Über-/Unterzahlreihe,
+  optional: im Setup über „+ zweite ÜZ-/UZ-Reihe“ anlegen; Knopf und Taste
+  sind nur aktiv, wenn die Reihe befüllt bzw. schon benutzt ist; auch in
+  der Besetzung pro Drittel nur dann sichtbar)
 - X: Gegnerschuss (wird automatisch der Reihe auf dem Feld zugeordnet;
   Experiment: danach Ergebnis und ggf. Blocker, siehe unten)
 - K: (Experiment) nächster Gegnerschuss ohne Ergebnis (Nachtragen)
@@ -225,7 +252,11 @@ Tasten in Durchgang 1:
 - J: Tor Ulm
 - B: Bully gewonnen, N: Bully verloren (Bullyspieler = Standard-
   Bullyspieler der aktuellen Reihe, per Klick änderbar)
-- P: Strafe (Dialog: Team, Spieler, Dauer)
+- P: Strafe oder Penalty (Dialog: Art Strafe/Penalty; Strafe: Team, Spieler,
+  Dauer; Penalty siehe unten). Der Hinweis danach nennt die ÜZ-/UZ-Tasten
+  (4/5, bei befüllter zweiter Reihe auch 7/8).
+- M: (Experiment) Szene markieren – in beiden Durchgängen, ohne Dialog, das
+  Video läuft weiter
 - D: Drittelbeginn / Drittelende
 - O: Spielunterbrechung Beginn / Ende (siehe „Spielunterbrechungen“;
   wirkt in beiden Durchgängen)
@@ -236,6 +267,57 @@ der gewählte Spieler ersetzt ihn ab der aktuellen Videozeit.
 Bei Tor und Gegentor wird automatisch gespeichert, welche Spieler laut
 aktuellem Stand auf dem Feld stehen (für Plus/Minus). Der Stand wird im
 Ereignis angezeigt und ist bearbeitbar.
+
+### Penaltys (Strafschüsse)
+Ablauf im Spiel: Pfiff → Uhr steht → Penalty → bei Tor Anspiel in der
+Mitte, sonst Bully aus der Ecke → erst dann läuft die Uhr weiter.
+- Erfassung über P, Art „Penalty“. Felder: Penalty für (VfB / Gegner),
+  Schütze (VfB: Kader, Gegner: Rückennummer), Torwart (bei Gegner-Penalty
+  unser Torwart auf dem Feld, vorbelegt; bei VfB-Penalty optional die
+  Nummer des Gegner-Torwarts), Ergebnis Tor / gehalten / vorbei (inkl.
+  Pfosten/Latte).
+- In einem Schritt (ein Strg+Z) entstehen: Unterbrechung mit Grund
+  „Penalty“ (Banner „PENALTY“, zählt nicht als Eiszeit), das Ereignis
+  `penalty` und bei Tor ein Tor bzw. Gegentor mit `penalty: true` und
+  `penaltyId`. Die Unterbrechung endet automatisch beim nächsten Bully
+  (B/N, im selben Rückgängig-Schritt wie das Bully) oder manuell mit O.
+- Bearbeiten des Penaltys (Ereignisliste) legt das zugehörige Tor an, passt
+  es an oder entfernt es; Löschen des Penaltys löscht das zugehörige Tor mit.
+- Durchgang 2: Wird während einer Penalty-Unterbrechung eine Kette
+  begonnen, erscheint ein Hinweis (die Uhr steht).
+- Eigener Ereignistyp statt Unterart von `strafe`: andere Felder (Schütze,
+  Torwart, Ergebnis statt Dauer), keine Zeitstrafe; Strafen zählen bei
+  Über-/Unterzahl als Anzahl, ein Penalty darf dort nie mitzählen.
+- Auswertung: Penalty-Tore zählen für den Spielstand, den Bericht-Abgleich
+  und die Übersicht „Penaltys“ (Anzahl, Tore für/gegen, Schütze, Torwart).
+  Sie zählen – wie im Eishockey üblich – nicht für Plus/Minus, nicht für
+  Corsi/Fenwick, nicht als Schuss/Gegnerschuss und nicht als Tor/Gegentor
+  der Reihe auf dem Feld (deshalb fehlen sie auch in der Gesamtzeile des
+  Reihenvergleichs), nicht bei Konter, Fangquote und Ergebnis der
+  Gegnerschüsse und färben keine Schicht. Der Check „Tore Durchgang 1 vs.
+  Schüsse mit Ergebnis Tor in Durchgang 2“ nimmt sie aus. Die
+  Schuss-Spalten der Spielertabelle (aus Durchgang 2) enthalten keine
+  Penaltys; Penalty-Tore stehen beim Schützen in der Übersicht „Penaltys“.
+- Saisonmanager: Tore, deren Tor-Art „Penalty“ bzw. „Strafstoß“ enthält,
+  sind in der Referenzliste als „Tor (Penalty)“ gekennzeichnet; im Abgleich
+  steht „laut Bericht Penalty“. Die genaue Bezeichnung im Saisonmanager ist
+  noch nicht an einem echten Bericht geprüft.
+- Excel: Penaltys im Ereignis-Blatt; im Blatt „Gesamt“ unter den Shifts
+  eine Tabelle „Penaltys“ (nur wenn es welche gibt).
+
+### Markierungen (Experiment, `markierungen`)
+- Taste M (beide Durchgänge) oder Knopf „Markieren β“ setzt sofort eine
+  Markierung `{ typ: 'markierung', time }` zur aktuellen Videozeit, ohne
+  Dialog; das Video läuft weiter.
+- In der Ereignisliste bearbeitbar: Kategorie (Lehrszene, Social Media,
+  Tor/Chance, Sonstiges), Notiz, Vorlauf/Nachlauf (Standard 8 s / 4 s);
+  eigener Filter „Markierungen“, Löschen und Strg+Z wie bei allen Ereignissen.
+- Auswertung → Szenen: Auswahl „Markierte Szenen“ (alle, je Kategorie oder
+  ohne Kategorie) öffnet die Playlist; Abspielen, CSV und ffmpeg-Export wie
+  bei den übrigen Szenen.
+- Markierungen zählen in keiner Statistik. Im Standardmodus bleiben sie
+  gespeichert, werden aber weder in der Liste noch im Excel gezeigt, und M
+  wirkt dort nicht.
 
 ### Ergebnis von Gegnerschüssen (Experiment)
 Schalter `gegnerschussErgebnis`. Im Standardmodus verhält sich X wie
@@ -340,7 +422,9 @@ Regeln:
 - Taste O startet eine Spielunterbrechung, nochmal O beendet sie. Die
   Taste wirkt in beiden Durchgängen (auch als Button „Unterbrechung“).
 - Beim Start fragt ein kleiner Dialog die Art ab: Timeout VfB, Timeout
-  Gegner, Verletzung, Sonstiges (Enter = Timeout VfB). Das Video pausiert
+  Gegner, Verletzung, Sonstiges, Penalty (Enter = Timeout VfB; „Penalty“
+  entsteht normalerweise automatisch mit einem Penalty und endet beim
+  nächsten Bully, siehe „Penaltys“). Das Video pausiert
   währenddessen.
 - Gespeichert als Ereignis `unterbrechung` mit art = beginn | ende und
   grund. Erscheint in der Ereignisliste (Filter „Unterbrechungen“) und im
@@ -445,6 +529,13 @@ beginnt; die Eiszeit wird am Drittelende abgeschnitten.
    aufs Tor, Blockquote, FF, FA, FF %) und „Torhüter β“ (Paraden,
    Gegentore, Fangquote). Definitionen siehe „Kennzahlen – Definitionen“,
    Abschnitt 13.
+9. Penaltys (Standard): Übersicht „Penaltys“ unter dem Reihenvergleich,
+   nur wenn es im Zeitraum Penaltys gibt (Anzahl, Tore für/gegen, je
+   Penalty Zeit, Team, Schütze, Torwart, Ergebnis).
+10. (Experiment) Lose Bälle und Rückeroberungen in Spielertabelle und
+    Reihenvergleich; Tabelle „Ballsicherheit β“ (Abschnitte 14 und 15 der
+    Kennzahlen-Definitionen).
+11. (Experiment) Schnellauswahl „Markierte Szenen“ (siehe „Markierungen“).
 
 ## Entscheidungen (geklärt nach Plan-Review)
 - Startart: file:// per Doppelklick.
@@ -745,7 +836,16 @@ Aus Strafen und den Reihen ÜZ/UZ:
 - Festlegung: 2 min, 2+2 min, 5 min und Matchstrafe zählen je als eine
   Über- bzw. Unterzahl, 10 min nicht. Spielzeit = solange die ÜZ- bzw.
   UZ-Reihe auf dem Feld steht; endet eine Über- oder Unterzahl vorzeitig
-  durch ein Tor, zählt nur die tatsächlich gespielte Zeit.
+  durch ein Tor, zählt nur die tatsächlich gespielte Zeit. Penaltys zählen
+  nie als Über-/Unterzahl.
+- Festlegung (Update A): ÜZ und ÜZ 2 bzw. UZ und UZ 2 werden für alle
+  Über-/Unterzahl-Kennzahlen zusammengefasst (Anzahl, Quote, Spielzeit,
+  Schüsse, Tore, Pässe pro Ballbesitz, Ballbesitzanteil); die Situation
+  einer Reihe (`sitOf`) kommt aus `LINES` (ÜZ 2 = Überzahl, UZ 2 =
+  Unterzahl). Im Reihenvergleich sind ÜZ 2 und UZ 2 eigene Zeilen (nur mit
+  Eiszeit), ebenso in der Excel-Schichtliste; die Excel-Matrix „Überzahl“
+  fasst ÜZ und ÜZ 2 zusammen. Alle Reihenlisten im Code werden aus `LINES`
+  abgeleitet (Reihenfolge 1, 2, 3, ÜZ, ÜZ 2, UZ, UZ 2, Spezial).
 
 ### 9. Rollen im Passnetzwerk
 Pro Spieler: Pässe gespielt, Pässe erhalten, Anteil an allen Pässen des
@@ -828,6 +928,30 @@ Bildschirm und im Excel. n je Quote:
   unbekannt. Alte Sicherungen bleiben gültig, das JSON hängt nicht vom
   Modus ab.
 
+### 14. Lose Bälle und Rückeroberungen (Experiment, `loseBaelle`)
+- Lose Bälle = erster Spieler einer Kette mit Start „loser Ball“ (Taste G);
+  keine neue Eingabe.
+- Rückeroberungen = Ballgewinne + lose Bälle (gleiche Definition wie beim
+  Gegenpressing: Start Ballgewinn per Taste A oder loser Ball).
+- Spielertabelle: „Lose Bälle“ direkt neben „Ballgewinne“, dazu
+  „Rückeroberungen“. Reihenvergleich: lose Bälle und Rückeroberungen
+  absolut und /10 (Reihe beim ersten Kontakt der Kette). Excel: Zeilen im
+  Kennzahlen-Block, Spalten im Reihenvergleich.
+
+### 15. Ballbilanz (Experiment, `ballbilanz`)
+- Ballbilanz = (Ballgewinne + lose Bälle) − (Fehlpässe + Ballverluste).
+  „Weggeschlagen“ (R) und Schüsse zählen nicht als Verlust. Heißt bewusst
+  „Ballbilanz“, weil die Excel-Vorlage schon eine „Bilanz“ (Ballgewinn −
+  Ballverlust) hat.
+- Ballbilanz /10 je 10 min Spielzeit; Verluste je 10 Ballkontakte =
+  (Fehlpässe + Ballverluste) ÷ Ballkontakte × 10. Grund: Wer viel am Ball
+  ist (Top, Aufbauspieler), hat automatisch mehr Verluste; die Bilanz allein
+  bestraft Spielmacher.
+- Anzeige als eigene Tabelle „Ballsicherheit β“ (Feldspieler; alle Werte
+  nebeneinander), damit die Standard-Spielertabelle unverändert bleibt.
+  Excel: Zeilen Ballbilanz, Ballbilanz /10′, Verluste je 10 Kontakte im
+  Kennzahlen-Block.
+
 ### Prüfwerte Heidelberg-Mannheim (27.10.2026)
 - Faktoren 0,840 / 0,842 / 0,872 (erwartet ca. 0,84 / 0,84 / 0,87).
 - Schüsse/Gegnerschüsse R1 12/16, R2 17/5, R3 8/22, CF % 43/77/27 %
@@ -855,6 +979,35 @@ Bildschirm und im Excel. n je Quote:
   (überspringt Schüsse mit Gegentor) geprüft. Moduswechsel ändert das
   JSON nicht. Excel 810 Formeln ohne Fehler.
 
+### Prüfung Update A (17.11.2026)
+- Standard, Heidelberg-Mannheim: Excel gegen die Referenz unverändert
+  (ganze Zahlen identisch, Zeiten ≤ 0,29 s, /10′ ≤ 0,005), Passmatrix
+  unverändert (Gesamtmatrix identisch), 706 Formeln ohne Fehler.
+  Experiment: Prüfwerte vom 27.10. unverändert. Moduswechsel ändert das
+  JSON nicht.
+- Penaltys (Testkopie): VfB-Penalty mit Tor und Gegner-Penalty gehalten,
+  jeweils mit Bully danach – die Unterbrechung kostet genau die Zeit bis
+  zum Bully an Eiszeit (40 s bzw. 30 s); Plus/Minus, Tore und Corsi der
+  Reihe unverändert, kein Schussversuch; Check „Tore D1 vs. D2“ ohne
+  Meldung. P-Dialog, Bearbeiten (Tor ↔ vorbei), Löschen und Rückgängig
+  ziehen das Tor korrekt mit.
+- ÜZ 2 / UZ 2 (Testkopie, beide Modi): Eiszeit und Einsätze der zweiten
+  Reihen richtig, ÜZ-Zeit = ÜZ + ÜZ 2, eigene Zeilen im Reihenvergleich und
+  Spalten in der Schichtliste, Knöpfe erst nach dem Befüllen.
+- Lose Bälle: Summe über Spieler = Ketten mit Start loser Ball (61 gesamt,
+  22 im 2. Drittel), auch je Reihe; Rückeroberungen = Ballgewinne + lose
+  Bälle (119). Ballbilanz und Verluste je 10 Kontakte für #10 und #22 von
+  Hand nachgerechnet (9 / 1,455 bzw. 7 / 0,806).
+- Markierungen: setzen (M in beiden Durchgängen), bearbeiten, löschen,
+  Rückgängig, Playlist je Kategorie, CSV- und ffmpeg-Export; im Standard
+  unsichtbar.
+- Video: Tempo bis 4× (ab 4× stumm) und Frame-Schritt (Umschalt+Komma/Punkt,
+  hält an, genau 1/fps) im Ein-Bildschirm-Modus und im Videofenster;
+  Bildrate eines 25- und 30-fps-Testvideos gemessen. Reaktionsausgleich nur
+  im Experiment und nur bei laufendem Video.
+- Excel mit allen Testdaten: Standard 742, Experiment 862 Formeln ohne
+  Fehler.
+
 ## Bekannte Grenzen
 - Gleichzeitige Strafen (4 gegen 4) und angezeigte Strafen werden nicht
   gesondert erfasst; maßgeblich ist die gesetzte Reihe (ÜZ/UZ/1–3).
@@ -880,9 +1033,14 @@ Bildschirm und im Excel. n je Quote:
     bei Ulmer Toren, vorgeschlagen aus dem Spielbericht)
   - bully: { spieler, gewonnen }
   - strafe: { team, spieler, dauer }
+  - penalty: { team: ulm | gegner, schuetze?, torwart?, ergebnis: tor |
+    gehalten | vorbei } – dazu unterbrechung mit grund penalty und bei Tor
+    ein tor/gegentor mit { penalty: true, penaltyId, aufDemFeld: [] }
+  - markierung: { kategorie?, notiz?, vorlauf?, nachlauf? } (Experiment,
+    zählt in keiner Statistik)
   - drittel: { nummer, beginn|ende }
   - unterbrechung: { art: beginn|ende, grund: timeoutVfb | timeoutGegner |
-    verletzung | sonstiges }
+    verletzung | sonstiges | penalty }
   - aufstellung: { drittel, reihen: { <Reihe>: { slots: [{ pos, id }],
     bully, ohneTorwart } } } – Besetzung ab Drittelbeginn
   - ballbesitz: { start (ballgewinn | bully | freischlag | torwart |
@@ -893,8 +1051,30 @@ Bildschirm und im Excel. n je Quote:
   nachträgliche Korrekturen konsistent bleiben.
 - Gültige Reihenbesetzung zu Zeit t = letztes `aufstellung`-Ereignis ≤ t,
   sonst die Reihen aus dem Setup.
+- Reihen-Schlüssel: 1, 2, 3, UEZ, UEZ2, UZ, UZ2, SPEZ (UEZ2/UZ2 optional;
+  ältere Sicherungen bekommen sie leer ergänzt, die Ereignisse bleiben
+  unverändert).
 
 ## Später, nicht in Version 1
+Geplante Erweiterungen (aus dem Team-Feedback vom 16.11.2026, noch nicht
+umgesetzt):
+- Fehlpass/Ballverlust mit Zone (eigenes Drittel / Mitte / Angriff) per
+  Zusatztaste nach Q bzw. W.
+- Ballgewinn-Vorarbeit: zweiter Spieler, der den Ballgewinn erzwingt (Druck,
+  Zustellen), als optionale Angabe zur Kette.
+- Passblock/Abwehraktion ohne Ballkontrolle als eigene Defensivaktion pro
+  Spieler (z. B. Pass abgefälscht, ohne dass ein eigener Ballbesitz folgt).
+- Schusskategorien: automatisch ableitbar (direkt nach Pass ≤ 1 s,
+  Abpraller ≤ 3 s nach eigenem Schuss, Konter) plus manuelle Tags
+  (Alleingang, Fernschuss, verdeckt/abgelenkt).
+- Paraden-Kategorien (gefangen, ins Aus, Abpraller), möglichst automatisch
+  aus dem nächsten Kettenstart in Durchgang 2 abgeleitet.
+- Schuss- und Szenenort per Klick auf eine Feldskizze in Kamerasicht, mit
+  Angriffsrichtung pro Drittel.
+- Zusatzabfragen pro Spiel einzeln abschaltbar; im Spiel speichern, welche
+  aktiv waren, damit „nicht erfasst“ als „–“ statt 0 erscheint.
+
+Weitere Ideen:
 - Zonen per Klick auf eine Spielfeldskizze
 - Vergleich mehrerer Spiele / Saisonwerte
 - Tastenbelegung im Tool anpassbar

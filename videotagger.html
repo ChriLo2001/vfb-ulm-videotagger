@@ -101,6 +101,10 @@
   #timeNow { font-size: 26px; font-weight: 600; }
   #timeTotal { color: var(--muted); font-size: 16px; }
   #rate { font-size: 18px; font-weight: 600; color: var(--accent); }
+  .fpsInfo { color: var(--muted); font-size: 12px; }
+  .reaktionBox { color: var(--muted); font-size: 12px; }
+  .reaktionBox input { width: 56px; padding: 1px 4px; }
+  .reaktionInfo { color: var(--warn); font-size: 12px; font-weight: 600; }
   #videoName { color: var(--muted); margin-left: auto; }
 
   #bar {
@@ -294,6 +298,8 @@
   .t-drittel { border-left-color: var(--purple); }
   .t-ball { border-left-color: #3fb6b0; }
   .t-pause { border-left-color: #e05c5c; }
+  .t-mark { border-left-color: #c9a6ff; }
+  .t-mark .evType { color: #c9a6ff; }
   .t-pause .evType { color: #e05c5c; }
   .pauseBadge {
     padding: 3px 10px; border-radius: 6px;
@@ -556,6 +562,10 @@
     <span id="playState">⏸ Pause</span>
     <span><span id="timeNow">00:00.0</span> <span id="timeTotal">/ --:--</span></span>
     <span id="rate">1x</span>
+    <span id="fps" class="fpsInfo" title="Bildrate des Videos (für Umschalt+Komma/Punkt = ein Frame zurück/vor)">30 fps?</span>
+    <label id="reaktionBox" class="reaktionBox" hidden title="Reaktionsausgleich (β): zieht bei laufendem Video Reaktionszeit × Tempo von der Videozeit jeder Eingabe ab. Pro Gerät gemerkt.">
+      Ausgleich β <input id="reaktionInput" type="number" min="0" max="3" step="0.1" value="0"> s</label>
+    <span id="reaktionInfo" class="reaktionInfo" hidden></span>
     <span id="videoName">Kein Video geladen</span>
   </div>
   <div id="bar" class="disabled">
@@ -583,6 +593,7 @@
       <span id="livePause" class="pauseBadge" hidden></span>
       <button id="btnPause" title="Taste O – in beiden Durchgängen"><kbd>O</kbd>Unterbrechung</button>
       <button id="btnUndo" title="Strg+Z">↶ Rückgängig</button>
+      <button id="btnMark" hidden title="Szene markieren (Taste M, beide Durchgänge) – Kategorie und Notiz später in der Ereignisliste"><kbd>M</kbd>Markieren β</button>
       <button id="btnEvDrawer" title="Ereignisliste ein-/ausklappen">Liste ▸</button>
     </div>
     <div id="field"></div>
@@ -661,7 +672,8 @@
 // Konstanten
 // ======================================================================
 
-const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4];
+const MUTE_AB_RATE = 4; // ab diesem Tempo stumm (Ton wird verzerrt)
 const SESSION_KEY = 'vfbTagger.session.v1';
 const GAME_KEY = 'vfbTagger.game.v1';
 const TPL_KEY = 'vfbTagger.templates.v1';
@@ -707,14 +719,29 @@ const GOALIE_KEY = '6';
 const POS_KEY_ORDER = ['1', '2', '3', '4', '5', '7', '8', '9']; // 6 = Torwart
 
 // taste = Taste in Durchgang 1
+// sit: Situation für Kennzahlen (gleich/uez/uz/spez). optional: nur sichtbar/aktiv, wenn befüllt
+// (zweite ÜZ-/UZ-Reihe). Die Reihenfolge bestimmt die Anzeige (ÜZ 2 direkt nach ÜZ usw.).
 const LINES = [
-  { key: '1',    label: 'Reihe 1', taste: '1' },
-  { key: '2',    label: 'Reihe 2', taste: '2' },
-  { key: '3',    label: 'Reihe 3', taste: '3' },
-  { key: 'UEZ',  label: 'ÜZ',      taste: '4', special: true },
-  { key: 'UZ',   label: 'UZ',      taste: '5', special: true },
-  { key: 'SPEZ', label: 'Spezial', taste: '6', special: true },
+  { key: '1',    label: 'Reihe 1', short: 'R1',    taste: '1', sit: 'gleich' },
+  { key: '2',    label: 'Reihe 2', short: 'R2',    taste: '2', sit: 'gleich' },
+  { key: '3',    label: 'Reihe 3', short: 'R3',    taste: '3', sit: 'gleich' },
+  { key: 'UEZ',  label: 'ÜZ',      short: 'ÜZ',    taste: '4', sit: 'uez',  special: true, title: 'Überzahl' },
+  { key: 'UEZ2', label: 'ÜZ 2',    short: 'ÜZ2',   taste: '7', sit: 'uez',  special: true, optional: true, title: 'Überzahl 2' },
+  { key: 'UZ',   label: 'UZ',      short: 'UZ',    taste: '5', sit: 'uz',   special: true, title: 'Unterzahl' },
+  { key: 'UZ2',  label: 'UZ 2',    short: 'UZ2',   taste: '8', sit: 'uz',   special: true, optional: true, title: 'Unterzahl 2' },
+  { key: 'SPEZ', label: 'Spezial', short: 'Spez.', taste: '6', sit: 'spez', special: true, title: 'Spezial' },
 ];
+const lineDef = key => LINES.find(l => l.key === key);
+const linesOfSit = sit => LINES.filter(l => l.sit === sit).map(l => l.key);
+// Optionale Reihe (ÜZ 2/UZ 2) ist in Gebrauch, wenn sie im Setup, in einer Besetzung oder einem Wechsel vorkommt
+function lineInUse(key) {
+  const l = lineDef(key);
+  if (!l || !l.optional) return true;
+  const filled = def => !!(def && (def.slots || []).some(s => s.id));
+  return filled(game.reihen[key]) ||
+    events.some(e => (e.typ === 'wechsel' && e.reihe === key) || (e.typ === 'aufstellung' && filled(e.reihen[key])));
+}
+let showOptionalLines = false; // Setup: Knopf „+ zweite ÜZ/UZ-Reihe“ gedrückt
 
 // Kaderposition: nur zur Sortierung der Auswahllisten
 const KADER_POS = [['V', 'Verteidiger'], ['F', 'Flügel'], ['C', 'Center'], ['S', 'Stürmer']];
@@ -727,16 +754,19 @@ const TYPES = {
   gegentor:      { label: 'Gegentor',      cls: 't-gegentor', group: 'tor' },
   bully:         { label: 'Bully',         cls: 't-bully',    group: 'bully' },
   strafe:        { label: 'Strafe',        cls: 't-strafe',   group: 'strafe' },
+  penalty:       { label: 'Penalty',       cls: 't-strafe',   group: 'strafe' },
   drittel:       { label: 'Drittel',       cls: 't-drittel',  group: 'drittel' },
   ballbesitz:    { label: 'Ballbesitz',    cls: 't-ball',     group: 'ballbesitz' },
   aufstellung:   { label: 'Besetzung',     cls: 't-drittel',  group: 'drittel' },
   unterbrechung: { label: 'Unterbrechung', cls: 't-pause',    group: 'unterbrechung' },
+  markierung:    { label: 'Markierung',    cls: 't-mark',     group: 'markierung' }, // Experiment (markierungen)
 };
 
 const FILTERS = [
   ['alle', 'Alle'], ['wechsel', 'Wechsel'], ['schuss', 'Gegnerschüsse'], ['tor', 'Tore'],
-  ['bully', 'Bullys'], ['strafe', 'Strafen'], ['drittel', 'Drittel / Besetzung'], ['unterbrechung', 'Unterbrechungen'],
+  ['bully', 'Bullys'], ['strafe', 'Strafen / Penaltys'], ['drittel', 'Drittel / Besetzung'], ['unterbrechung', 'Unterbrechungen'],
   ['ballbesitz', 'Ballbesitz'],
+  ['markierung', 'Markierungen β'], // nur im Experimentmodus (markierungen)
 ];
 
 const DAUER = [['2', '2 min'], ['2+2', '2+2 min'], ['5', '5 min'], ['10', '10 min'], ['MS', 'Matchstrafe']];
@@ -747,6 +777,7 @@ const GRUENDE = [
   { code: 'timeoutGegner', label: 'Timeout Gegner', banner: 'TIMEOUT GEGNER' },
   { code: 'verletzung',    label: 'Verletzung',     banner: 'VERLETZUNG' },
   { code: 'sonstiges',     label: 'Sonstiges',      banner: 'UNTERBRECHUNG' },
+  { code: 'penalty',       label: 'Penalty',        banner: 'PENALTY' }, // beginnt automatisch mit einem Penalty, endet beim Bully
 ];
 const grund = code => GRUENDE.find(g => g.code === code) || GRUENDE[3];
 
@@ -817,6 +848,10 @@ const FEATURES = {
   gegentorAlsSchuss:    'standard',   // Gegentor ohne Gegnerschuss ±3 s zählt als Gegnerschuss (HD-MA: kein Fall)
   plausiTorOhneBully:   'standard',   // Plausibilitätscheck „Tor ohne Bully in 3 min“ (nur Hinweis)
   gegnerschussErgebnis: 'experiment', // nach X: Ergebnis (gehalten/geblockt/vorbei/Tor) und Blocker; Nachtragen (K); Blocks, Fenwick für beide Seiten
+  reaktionsausgleich:   'experiment', // Eingaben bei laufendem Video um Reaktionszeit × Tempo vorverlegen (Einstellung pro Gerät, Standard 0 s)
+  loseBaelle:           'experiment', // Spalten „Lose Bälle“ und „Rückeroberungen“ (Spieler, Reihen)
+  ballbilanz:           'experiment', // Tabelle „Ballsicherheit“: Ballbilanz, Ballbilanz /10, Verluste je 10 Ballkontakte
+  markierungen:         'experiment', // Taste M: Szene markieren, Kategorie/Notiz, Playlist „Markierte Szenen“
 };
 const modus = () => prefs.get('modus', 'standard');
 const feat = name => FEATURES[name] === 'standard' || modus() === 'experiment';
@@ -1085,7 +1120,7 @@ const fieldPlayers = () => game.kader.filter(p => p.position !== 'TW').sort(byNu
 const goalies = () => game.kader.filter(p => p.position === 'TW').sort(byNumber);
 const lineLabel = key => (LINES.find(l => l.key === key) || { label: '–' }).label;
 // Kurzform für Tabellen: R1, R2, R3, ÜZ, UZ, Spez.
-const lineShort = key => ({ UEZ: 'ÜZ', UZ: 'UZ', SPEZ: 'Spez.' })[key] || 'R' + key;
+const lineShort = key => (lineDef(key) || {}).short || 'R' + key;
 const allPlayerOptions = () => [...fieldPlayers(), ...goalies()].map(p => [p.id, pLabel(p)]);
 
 // ======================================================================
@@ -1113,6 +1148,9 @@ function addEvent(ev, extra) {
 function deleteEvent(id) {
   const i = events.findIndex(e => e.id === id);
   if (i < 0) return;
+  // Penalty: das zugehörige Tor/Gegentor mit löschen (ein Schritt für Strg+Z)
+  const goal = events[i].typ === 'penalty' && penaltyGoalOf(events[i]);
+  if (goal) { applyBatch({ remove: [id, goal.id] }); return; }
   const [ev] = events.splice(i, 1);
   undoStack.push({ op: 'del', ev });
   changed();
@@ -1315,8 +1353,16 @@ function describe(ev) {
           ? ` · ${oppResultLabel(ev.ergebnis)}${ev.ergebnis === 'geblockt' ? ' · ' + (ev.blocker ? pl(ev.blocker) : 'Blocker ?') : ''}` : '');
     case 'tor':
     case 'gegentor':
+      if (ev.penalty) return 'Penalty' + (ev.schuetze ? ` · Schütze ${nr(ev.schuetze)}` : '') + ' (zählt nicht für Plus/Minus und Reihe)';
       return (ev.schuetze ? `Schütze ${nr(ev.schuetze)}${ev.vorlage ? ', Vorlage ' + nr(ev.vorlage) : ''} · ` : '') +
         'Feld: ' + (ev.aufDemFeld.length ? ev.aufDemFeld.map(nr).join(' · ') : '–');
+    case 'penalty': {
+      const s = ev.team === 'ulm' ? (ev.schuetze ? nr(ev.schuetze) : '?') : (ev.schuetze ? '#' + ev.schuetze : '?');
+      const tw = ev.team === 'gegner' ? (ev.torwart ? nr(ev.torwart) : '?') : (ev.torwart ? '#' + ev.torwart : '');
+      return `${ev.team === 'ulm' ? 'VfB' : 'Gegner'} · Schütze ${s}${tw ? ' · TW ' + tw : ''} · ${penaltyErgLabel(ev.ergebnis)}`;
+    }
+    case 'markierung':
+      return [ev.kategorie ? markKategorieLabel(ev.kategorie) : 'ohne Kategorie', ev.notiz || ''].filter(Boolean).join(' · ');
     case 'bully':
       return `${ev.gewonnen ? 'gewonnen' : 'verloren'} – ${pl(ev.spieler)}`;
     case 'strafe': {
@@ -1558,7 +1604,16 @@ function berichtTorFuer(t) {
 
 function actBully(gewonnen, t) {
   const spieler = bullyPlayer(lineupAt(t));
-  record({ typ: 'bully', time: t, spieler, gewonnen }, gewonnen ? 'Bully gewonnen' : 'Bully verloren');
+  const pz = unterbrechungAt(t);
+  if (pz && pz.grund === 'penalty') {
+    // Penalty-Unterbrechung endet mit dem Bully (ein Schritt für Strg+Z)
+    const ev = { typ: 'bully', time: t, spieler, gewonnen };
+    applyBatch({ add: [{ typ: 'unterbrechung', time: t, art: 'ende', grund: 'penalty' }, ev] });
+    flash((gewonnen ? 'Bully gewonnen' : 'Bully verloren') + ' · Penalty-Unterbrechung beendet');
+    $('lastAction').textContent = `${fmtTime(t, true)} · Bully – ${describe(ev)} (Ende Penalty-Unterbrechung)`;
+  } else {
+    record({ typ: 'bully', time: t, spieler, gewonnen }, gewonnen ? 'Bully gewonnen' : 'Bully verloren');
+  }
   if (!spieler) notice('Bully ohne Spieler erfasst (kein Bullyspieler) – in der Liste nachtragen.', 'warn');
 }
 
@@ -1624,16 +1679,86 @@ const penaltyFromForm = v => ({
   dauer: v.dauer,
 });
 
+// Penalty (Strafschuss): eigener Ereignistyp (keine Zeitstrafe, zählt nie als Über-/Unterzahl).
+const PENALTY_ERG = [['tor', 'Tor'], ['gehalten', 'gehalten'], ['vorbei', 'vorbei (inkl. Pfosten/Latte)']];
+const penaltyErgLabel = code => (PENALTY_ERG.find(x => x[0] === code) || [, 'unbekannt'])[1];
+
+function penaltyShotFields(ev) {
+  return [
+    { name: 'pTeam', label: 'Penalty für', type: 'select', options: [['ulm', 'VfB Ulm'], ['gegner', 'Gegner']], value: ev.team },
+    { name: 'pSchuetzeUlm', label: 'Schütze', type: 'select', options: [['', '– unbekannt –'], ...allPlayerOptions()],
+      value: ev.team === 'ulm' ? ev.schuetze || '' : '', when: v => v.pTeam === 'ulm' },
+    { name: 'pSchuetzeGegner', label: 'Schütze (Rückennummer)', type: 'text',
+      value: ev.team === 'gegner' ? ev.schuetze || '' : '', when: v => v.pTeam === 'gegner' },
+    { name: 'pTorwartUlm', label: 'Unser Torwart', type: 'select', options: [['', '– unbekannt –'], ...allPlayerOptions()],
+      value: ev.team === 'gegner' ? ev.torwart || '' : '', when: v => v.pTeam === 'gegner' },
+    { name: 'pTorwartGegner', label: 'Torwart Gegner (Nr., optional)', type: 'text',
+      value: ev.team === 'ulm' ? ev.torwart || '' : '', when: v => v.pTeam === 'ulm' },
+    { name: 'pErgebnis', label: 'Ergebnis', type: 'select', options: PENALTY_ERG, value: ev.ergebnis || 'tor' },
+  ];
+}
+
+const penaltyShotFromForm = v => ({
+  team: v.pTeam,
+  schuetze: (v.pTeam === 'ulm' ? v.pSchuetzeUlm : v.pSchuetzeGegner) || null,
+  torwart: (v.pTeam === 'ulm' ? v.pTorwartGegner : v.pTorwartUlm) || null,
+  ergebnis: v.pErgebnis,
+});
+
+// Tor/Gegentor eines Penaltys (Kennzeichen penalty; ohne Spieler auf dem Feld → kein Plus/Minus)
+const penaltyGoal = (p, id) => ({ id: id || uid(), typ: p.team === 'ulm' ? 'tor' : 'gegentor', time: p.time, aufDemFeld: [],
+  penalty: true, penaltyId: p.id, ...(p.team === 'ulm' && p.schuetze ? { schuetze: p.schuetze } : {}) });
+const penaltyGoalOf = p => events.find(e => (e.typ === 'tor' || e.typ === 'gegentor') && e.penaltyId === p.id);
+
+// Mehrere Ereignisse hinzufügen, ändern, löschen – ein Schritt für Strg+Z
+function applyBatch({ add = [], update = [], remove = [] }) {
+  const restore = [];
+  for (const upd of update) {
+    const i = events.findIndex(e => e.id === upd.id);
+    if (i >= 0) restore.push(events.splice(i, 1)[0]);
+  }
+  for (const id of remove) {
+    const i = events.findIndex(e => e.id === id);
+    if (i >= 0) restore.push(events.splice(i, 1)[0]);
+  }
+  for (const ev of [...add, ...update]) { ev.id = ev.id || uid(); insertSorted(ev); }
+  const first = add[0] || update[0] || restore[0];
+  undoStack.push({ op: 'batch', remove: [...add, ...update].map(e => e.id), restore, ev: first });
+  changed();
+}
+
+// Penalty anlegen: Unterbrechung „Penalty“ (endet beim nächsten Bully oder mit O), Penalty, bei Tor das Tor
+function recordPenalty(t, data) {
+  const p = { id: uid(), typ: 'penalty', time: t, ...data };
+  const add = [];
+  if (!unterbrechungAt(t)) add.push({ id: uid(), typ: 'unterbrechung', time: t, art: 'beginn', grund: 'penalty' });
+  add.push(p);
+  if (p.ergebnis === 'tor') add.push(penaltyGoal(p));
+  applyBatch({ add });
+  flash(`Penalty ${p.team === 'ulm' ? 'VfB' : 'Gegner'}: ${penaltyErgLabel(p.ergebnis)}`);
+  $('lastAction').textContent = `${fmtTime(t, true)} · Penalty – ${describe(p)}`;
+  notice('Penalty erfasst – Unterbrechung läuft bis zum nächsten Bully (B/N) oder O.');
+}
+
 async function actPenalty(t) {
   const wasPlaying = isPlaying();
   pause();
   focusControlWindow();
-  const v = await formDialog(`Strafe bei ${fmtTime(t, true)}`,
-    penaltyFields({ team: 'ulm', spieler: null, dauer: '2' }), 'Erfassen');
-  if (v) {
+  // Art: Strafe (Zeitstrafe) oder Penalty (Strafschuss); Felder je nach Art
+  const onlyIf = (f, art) => ({ ...f, when: v => v.art === art && (!f.when || f.when(v)) });
+  const lu = lineupAt(t);
+  const v = await formDialog(`Strafe / Penalty bei ${fmtTime(t, true)}`, [
+    { name: 'art', label: 'Art', type: 'select', options: [['strafe', 'Strafe (Zeitstrafe)'], ['penalty', 'Penalty (Strafschuss)']], value: 'strafe' },
+    ...penaltyFields({ team: 'ulm', spieler: null, dauer: '2' }).map(f => onlyIf(f, 'strafe')),
+    ...penaltyShotFields({ team: 'gegner', torwart: lu.ohneTorwart ? null : lu.torwart, ergebnis: 'tor' }).map(f => onlyIf(f, 'penalty')),
+  ], 'Erfassen');
+  if (v && v.art === 'penalty') {
+    recordPenalty(t, penaltyShotFromForm(v));
+  } else if (v) {
     record({ typ: 'strafe', time: t, ...penaltyFromForm(v) }, 'Strafe');
-    notice('ÜZ/UZ-Reihe setzen? 4 = ÜZ, 5 = UZ');
-    flash('ÜZ/UZ setzen? (4 / 5)');
+    const tasten = LINES.filter(l => (l.sit === 'uez' || l.sit === 'uz') && lineInUse(l.key)).map(l => `${l.taste} = ${l.label}`);
+    notice(`ÜZ/UZ-Reihe setzen? ${tasten.join(', ')}`);
+    flash(`ÜZ/UZ setzen? (${tasten.map(x => x.split(' ')[0]).join(' / ')})`);
   }
   if (wasPlaying) play();
 }
@@ -1654,6 +1779,31 @@ function doSub(t, raus, rein, alsoLineKey) {
   }
 }
 
+// ---------- Markierungen (Schalter markierungen): Taste M in beiden Durchgängen, ohne Dialog ----------
+const MARK_KAT = [['lehrszene', 'Lehrszene'], ['social', 'Social Media'], ['chance', 'Tor/Chance'], ['sonstiges', 'Sonstiges']];
+const markKategorieLabel = code => (MARK_KAT.find(k => k[0] === code) || [, code])[1];
+const MARK_KEY = 'm';
+
+function actMark(t) {
+  record({ typ: 'markierung', time: t }, 'Markierung');
+}
+
+function markFields(ev) {
+  const [v, n] = CLIP_VN.markierung;
+  return [
+    { name: 'kategorie', label: 'Kategorie', type: 'select', options: [['', '– ohne –'], ...MARK_KAT], value: ev.kategorie || '' },
+    { name: 'notiz', label: 'Notiz', type: 'text', value: ev.notiz || '' },
+    { name: 'vorlauf', label: `Vorlauf (s, Standard ${v})`, type: 'text', value: ev.vorlauf ?? '' },
+    { name: 'nachlauf', label: `Nachlauf (s, Standard ${n})`, type: 'text', value: ev.nachlauf ?? '' },
+  ];
+}
+
+function markFromForm(v) {
+  const num = s => { const x = parseFloat(String(s).replace(',', '.')); return isFinite(x) && x >= 0 ? Math.min(x, 120) : undefined; };
+  const out = { kategorie: v.kategorie || undefined, notiz: (v.notiz || '').trim() || undefined, vorlauf: num(v.vorlauf), nachlauf: num(v.nachlauf) };
+  return out; // undefined-Felder fallen beim Speichern (JSON) weg
+}
+
 // Durchgang-1-Tasten (Kleinbuchstaben)
 const D1_ACTIONS = [
   { key: 'x', label: 'Gegnerschuss',       run: t => actShot(t) },
@@ -1671,7 +1821,15 @@ for (const a of D1_ACTIONS) D1_KEYS[a.key] = a.run;
 
 function capture(run) {
   if (!state.file) { notice('Bitte zuerst das Spielvideo wählen.', 'warn'); return; }
-  run(getTime());
+  run(captureTime());
+}
+
+// Videozeit einer Eingabe; Reaktionsausgleich (Experiment): bei laufendem Video Reaktionszeit × Tempo abziehen
+const reaktionSek = () => feat('reaktionsausgleich') ? Math.max(0, +prefs.get('reaktion', 0) || 0) : 0;
+function captureTime() {
+  const t = getTime();
+  const d = isPlaying() ? reaktionSek() * state.rate : 0;
+  return Math.max(0, t - d);
 }
 
 // ======================================================================
@@ -1714,6 +1872,8 @@ function chainAddPlayer(id, t) {
   if (!id) return;
   const last = chain.kette[chain.kette.length - 1];
   if (last && last.spieler === id) return; // derselbe Spieler zweimal hintereinander
+  const pz = !chainActive() && unterbrechungAt(t);
+  if (pz && pz.grund === 'penalty') notice('Achtung: Während einer Penalty-Unterbrechung ist kein Ballbesitz zu erwarten (die Uhr steht bis zum Bully).', 'warn');
   chainStep(() => {
     if (!chain.start) {
       chain.start = preselectStart(t);
@@ -1991,6 +2151,7 @@ function lineupDialog(title, vorlage) {
     const grid = h('div', { class: 'reihenGrid' });
     for (const l of LINES) {
       const def = data[l.key];
+      if (l.optional && !lineInUse(l.key) && !def.slots.some(s => s.id)) continue;
       const f = formationFor(l.key);
       const card = h('div', { class: 'reiheCard' + (l.special ? ' special' : '') },
         h('h3', null, l.label, ' ', h('kbd', null, l.taste)));
@@ -2131,6 +2292,13 @@ async function editEvent(id) {
     case 'strafe':
       fields.push(...penaltyFields(ev));
       break;
+    case 'penalty':
+      fields.push(...penaltyShotFields(ev),
+        { type: 'info', text: 'Bei Ergebnis Tor gehört ein Tor bzw. Gegentor (Penalty) dazu; es wird beim Speichern angelegt, angepasst oder entfernt.' });
+      break;
+    case 'markierung':
+      fields.push(...markFields(ev));
+      break;
     case 'unterbrechung':
       fields.push(
         { name: 'grund', label: 'Art', type: 'select', options: GRUENDE.map(g => [g.code, g.label]), value: ev.grund },
@@ -2208,6 +2376,18 @@ async function editEvent(id) {
       break;
     case 'bully': upd.spieler = v.spieler || null; upd.gewonnen = v.gewonnen === '1'; break;
     case 'strafe': Object.assign(upd, penaltyFromForm(v)); break;
+    case 'penalty': {
+      // zugehöriges Tor/Gegentor mitziehen (ein Schritt für Strg+Z)
+      Object.assign(upd, penaltyShotFromForm(v));
+      const goal = penaltyGoalOf(ev);
+      const batch = { update: [upd], add: [], remove: [] };
+      if (upd.ergebnis === 'tor') {
+        if (goal) batch.update.push(penaltyGoal(upd, goal.id)); else batch.add.push(penaltyGoal(upd));
+      } else if (goal) batch.remove.push(goal.id);
+      applyBatch(batch);
+      return;
+    }
+    case 'markierung': Object.assign(upd, markFromForm(v)); break;
     case 'drittel': upd.nummer = +v.nummer; upd.art = v.art; break;
     case 'unterbrechung': upd.grund = v.grund; upd.art = v.art; break;
   }
@@ -2410,12 +2590,12 @@ function wirePlayer(w, vid, ui, embedded) {
   state.ui = { ...ui, flashTimer: 0, last: '' };
   if (vid._wired) return; // eingebettetes <video> wird bei jedem Moduswechsel wiederverwendet
   vid._wired = true;
+  watchFps(vid);
 
   vid.addEventListener('loadedmetadata', () => {
     if (state.vid !== vid) return;
     if (isFinite(vid.duration)) state.duration = vid.duration;
-    vid.defaultPlaybackRate = state.rate;
-    vid.playbackRate = state.rate;
+    applyRate(vid);
     vid.currentTime = Math.min(state.time, state.duration);
     if (state.resume) { state.resume = false; play(); }
     updateUI();
@@ -2522,6 +2702,7 @@ function attachVideo() {
   if (state.url) win.URL.revokeObjectURL(state.url);
   state.url = win.URL.createObjectURL(file);
   vid.src = state.url;
+  state.fps = null; // Bildrate der neuen Datei wird beim Abspielen neu gemessen
 }
 
 // ---------- Einstellungen pro Gerät (nicht im Spiel gespeichert) ----------
@@ -2579,6 +2760,7 @@ function setBetriebsmodus(m) {
 function renderModeSegs() {
   for (const b of document.querySelectorAll('#modusSeg button')) b.classList.toggle('active', b.dataset.modus === modus());
   $('expBadge').hidden = modus() !== 'experiment';
+  $('btnMark').hidden = !feat('markierungen');
   for (const b of document.querySelectorAll('#anzeigeSeg button')) b.classList.toggle('active', b.dataset.anzeige === anzeige());
   $('btnEvDrawer').textContent = document.body.classList.contains('evOpen') ? 'Liste ◂' : 'Liste ▸';
 }
@@ -2707,14 +2889,58 @@ function seekBy(delta) {
   flash((delta > 0 ? '+' : '−') + Math.abs(delta) + ' s');
 }
 
+// Ein Frame vor/zurück (Umschalt+Punkt / Umschalt+Komma); hält das Video an
+function frameStep(dir) {
+  if (!state.file) return;
+  pause();
+  seekTo(getTime() + dir / videoFps());
+  flash(dir > 0 ? 'Frame ▸' : '◂ Frame');
+}
+
+// Bildrate: per requestVideoFrameCallback beim Abspielen gemessen, sonst 30 fps
+const FPS_FALLBACK = 30;
+const FPS_TYPISCH = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
+const videoFps = () => state.fps || FPS_FALLBACK;
+function watchFps(vid) {
+  if (!vid || vid._fpsWired || typeof vid.requestVideoFrameCallback !== 'function') return;
+  vid._fpsWired = true;
+  let last = null;
+  const samples = [];
+  const cb = (now, meta) => {
+    if (state.vid === vid && last && meta.presentedFrames > last.frames && meta.mediaTime > last.media && vid.playbackRate === 1) {
+      const f = (meta.presentedFrames - last.frames) / (meta.mediaTime - last.media);
+      if (f > 5 && f < 130) samples.push(f);
+      if (samples.length > 40) samples.shift();
+      if (samples.length >= 10) {
+        const med = median(samples);
+        // nächstgelegene übliche Bildrate (innerhalb 4 %), sonst gerundet
+        const typ = FPS_TYPISCH.filter(x => Math.abs(x - med) / x < 0.04).sort((a, b) => Math.abs(a - med) - Math.abs(b - med))[0];
+        const fps = typ || Math.round(med);
+        if (fps !== state.fps) { state.fps = fps; updateUI(); }
+      }
+    }
+    last = { frames: meta.presentedFrames, media: meta.mediaTime };
+    vid.requestVideoFrameCallback(cb);
+  };
+  vid.requestVideoFrameCallback(cb);
+  vid.addEventListener('seeked', () => { last = null; });
+  vid.addEventListener('ratechange', () => { last = null; });
+  vid.addEventListener('loadstart', () => { last = null; samples.length = 0; }); // neue Datei: neu messen
+}
+
+// Tempo auf ein <video> übertragen; ab MUTE_AB_RATE stumm (sonst verzerrter Ton), darunter wieder mit Ton
+function applyRate(vid) {
+  if (!vid) return;
+  vid.defaultPlaybackRate = state.rate;
+  vid.playbackRate = state.rate;
+  vid.muted = state.rate >= MUTE_AB_RATE;
+}
+
 function stepRate(dir) {
   const i = Math.max(0, Math.min(RATES.length - 1, RATES.indexOf(state.rate) + dir));
   state.rate = RATES[i];
-  if (state.vid) {
-    state.vid.defaultPlaybackRate = state.rate;
-    state.vid.playbackRate = state.rate;
-  }
-  flash(fmtRate(state.rate));
+  applyRate(state.vid);
+  flash(fmtRate(state.rate) + (state.rate >= MUTE_AB_RATE ? ' (stumm)' : ''));
   saveSession();
   updateUI();
 }
@@ -2730,6 +2956,16 @@ const VIDEO_KEYS = {
   ',':          { run: () => stepRate(-1) },
   '.':          { run: () => stepRate(+1) },
 };
+
+// Videotaste zu einem Tastendruck (inkl. Frame-Schritt über e.code, unabhängig vom Tastaturlayout)
+function videoKey(e) {
+  if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    // e.code (Comma/Period) gilt auf jeder Tastatur; Ersatz über das Zeichen (deutsch ; :, US < >), falls kein Code ankommt
+    const dir = e.code === 'Period' || '.:>'.includes(e.key || '-') ? 1 : e.code === 'Comma' || ',;<'.includes(e.key || '-') ? -1 : 0;
+    if (dir && e.key) return { repeat: true, run: () => frameStep(dir) };
+  }
+  return VIDEO_KEYS[e.key];
+}
 
 const NON_TEXT_INPUTS = ['button', 'checkbox', 'radio', 'range', 'file', 'submit', 'reset', 'color'];
 
@@ -2758,7 +2994,7 @@ function handleKey(e) {
       else playClip(Math.max(0, Math.min(playlist.clips.length - 1, playlist.idx + (k === 'n' ? 1 : -1))));
       return;
     }
-    const vk = VIDEO_KEYS[e.key];
+    const vk = videoKey(e);
     if (vk) { e.preventDefault(); if (!(e.repeat && !vk.repeat)) vk.run(e); }
     return;
   }
@@ -2777,7 +3013,7 @@ function handleKey(e) {
     return;
   }
 
-  const vk = VIDEO_KEYS[e.key];
+  const vk = videoKey(e);
   if (vk) {
     e.preventDefault();
     if (e.repeat && !vk.repeat) return;
@@ -2797,7 +3033,9 @@ function handleKey(e) {
       }
     }
     const nachtrag = session.durchgang === 1 && key === NACHTRAG_KEY && feat('gegnerschussErgebnis') ? t => nextOppOffen(t) : null;
+    const mark = key === MARK_KEY && feat('markierungen') ? actMark : null; // M: in beiden Durchgängen
     const run = key === 'o' ? actPause // Unterbrechung: in beiden Durchgängen
+      : mark ? mark
       : nachtrag || (session.durchgang === 2 ? d2Action(key) : D1_KEYS[key]);
     if (run) {
       e.preventDefault();
@@ -2817,6 +3055,14 @@ function updateUI() {
   $('timeNow').textContent = fmtTime(t, true);
   $('timeTotal').textContent = '/ ' + (state.file ? fmtTime(state.duration) : '--:--');
   $('rate').textContent = fmtRate(state.rate);
+  $('fps').textContent = state.fps ? `${String(state.fps).replace('.', ',')} fps` : `${FPS_FALLBACK} fps?`;
+  $('fps').title = state.fps ? `Erkannte Bildrate ${String(state.fps).replace('.', ',')} fps (Umschalt+Komma/Punkt = ein Frame zurück/vor)`
+    : `Bildrate noch nicht erkannt (wird bei 1x beim Abspielen gemessen) – Frame-Schritt mit ${FPS_FALLBACK} fps`;
+  const ra = feat('reaktionsausgleich');
+  $('reaktionBox').hidden = !ra;
+  const rs = reaktionSek();
+  $('reaktionInfo').hidden = !(ra && rs > 0);
+  if (ra && rs > 0) $('reaktionInfo').textContent = `Eingaben −${(rs * state.rate).toLocaleString('de-DE', { maximumFractionDigits: 2 })} s`;
   $('videoName').textContent = state.file
     ? `${state.file.name} · ${fmtSize(state.file.size)}`
     : 'Kein Video geladen';
@@ -3063,6 +3309,7 @@ function renderReihen() {
   box.textContent = '';
   const grid = h('div', { class: 'reihenGrid' });
   for (const l of LINES) {
+    if (l.optional && !showOptionalLines && !lineInUse(l.key)) continue;
     const def = game.reihen[l.key];
     const f = formationFor(l.key);
     const ids = def.slots.map(s => s.id).filter(Boolean);
@@ -3104,6 +3351,10 @@ function renderReihen() {
     h('p', { class: 'hint' }, 'Die Kaderposition (V/F/C/S) dient nur der Sortierung der Auswahllisten. ' +
       '„Bully“ = Standard-Bullyposition der Reihe: Wer dort steht, nimmt das Bully (auch nach einem Einzelwechsel). ' +
       'Sonderreihen: zusätzliche Plätze heißen F6, F7 … und bekommen die Tasten 7, 8, 9.'));
+  if (LINES.some(l => l.optional && !showOptionalLines && !lineInUse(l.key))) {
+    box.append(h('button', { onclick: () => { showOptionalLines = true; renderReihen(); } },
+      '+ zweite ÜZ-/UZ-Reihe (Tasten 7 / 8)'));
+  }
 }
 
 function resizeSlots(key, delta) {
@@ -3290,7 +3541,7 @@ async function applySpielbericht(j, expectedId) {
     tore: v.teile.includes('ref') ? evs.filter(e => e.event_type === 'goal').map(e => ({
       periode: e.period, zeit: e.time, team: team(e), schuetze: e.number || null, vorlage: e.assist || null,
       stand: unser === 'home' ? `${e.home_goals}:${e.guest_goals}` : `${e.guest_goals}:${e.home_goals}`,
-      art: e.goal_type_string || '' })) : [],
+      art: e.goal_type_string || '', penalty: /penalty|strafsto/i.test(e.goal_type_string || '') })) : [],
     strafen: v.teile.includes('ref') ? evs.filter(e => e.event_type === 'penalty').map(e => ({
       periode: e.period, zeit: e.time, team: team(e), nummer: e.number || null,
       art: e.penalty_type_string || '', grund: e.penalty_reason_string || '' })) : [],
@@ -3394,11 +3645,13 @@ function renderBericht() {
       : h('p', { class: 'hint' }, 'Ohne Spielbericht funktioniert alles wie bisher (manuelle Eingabe).'));
 }
 
+// Penalty-Tor im Bericht (Tor-Art enthält „Penalty“ bzw. „Strafstoß“; genaue Bezeichnung im Saisonmanager ungeprüft)
+const berichtPenalty = t => !!(t.penalty || /penalty|strafsto/i.test(t.art || ''));
 // Tore und Strafen des Berichts in Spielreihenfolge
 function berichtListe(b) {
   const key = r => r.periode * 10000 + (parseInt(r.zeit) || 0) * 60 + (parseInt(String(r.zeit).split(':')[1]) || 0);
   return [
-    ...b.tore.map(t => ({ ...t, typ: 'Tor', nummer: t.schuetze, details: `Stand ${t.stand}${t.vorlage ? ', Vorlage #' + t.vorlage : ''}` })),
+    ...b.tore.map(t => ({ ...t, typ: berichtPenalty(t) ? 'Tor (Penalty)' : 'Tor', nummer: t.schuetze, details: `Stand ${t.stand}${t.vorlage ? ', Vorlage #' + t.vorlage : ''}` })),
     ...b.strafen.map(s => ({ ...s, typ: 'Strafe', details: `${s.art}${s.grund ? ' – ' + s.grund : ''}` })),
   ].sort((a, b2) => key(a) - key(b2));
 }
@@ -3551,6 +3804,7 @@ function refreshLive(force) {
   $('liveLine').textContent = 'Auf dem Feld: ' + overlayInfo.reihe;
   renderField(lu, bully);
   for (const b of $('lineButtons').children) b.classList.toggle('active', b.dataset.key === lu.line);
+  for (const b of $('lineButtons').children) b.hidden = !lineInUse(b.dataset.key);
 }
 
 // Formations-Koordinaten (0–100) auf das Feld abbilden; x leicht gestaucht, damit Randplätze ganz sichtbar bleiben.
@@ -3600,15 +3854,20 @@ function playerBtn(id, pos, taste, isGoalie, bully, pulled) {
 function renderEvents() {
   const list = $('evList');
   list.textContent = '';
+  const optMark = $('evFilter').querySelector('option[value="markierung"]');
+  if (optMark) optMark.hidden = !feat('markierungen');
+  if (!feat('markierungen') && $('evFilter').value === 'markierung') $('evFilter').value = 'alle';
   const f = $('evFilter').value || 'alle';
   let n = 0;
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i];
     if (f !== 'alle' && TYPES[ev.typ].group !== f) continue;
+    if (ev.typ === 'markierung' && !feat('markierungen')) continue; // gespeichert, im Standardmodus unsichtbar
     n++;
     list.append(eventRow(ev));
   }
-  $('evCount').textContent = f === 'alle' ? `${n}` : `${n} von ${events.length}`;
+  const sichtbar = feat('markierungen') ? events.length : events.filter(e => e.typ !== 'markierung').length;
+  $('evCount').textContent = f === 'alle' ? `${n}` : `${n} von ${sichtbar}`;
   if (!n) list.append(h('p', { class: 'placeholder', style: 'padding:0 6px' },
     events.length ? 'Keine Ereignisse für diesen Filter.' : 'Noch keine Ereignisse.'));
 }
@@ -3805,7 +4064,7 @@ function reihenSources(range) {
 }
 
 const emptyPlayerStats = id => ({
-  id, eiszeit: 0, spielzeit: 0, einsaetze: 0, ballgewinne: 0,
+  id, eiszeit: 0, spielzeit: 0, einsaetze: 0, ballgewinne: 0, loseBaelle: 0,
   s_tor: 0, s_gehalten: 0, s_geblockt: 0, s_vorbei: 0, schuesse: 0,
   bullyG: 0, bullyV: 0, paesse: 0, fehlpaesse: 0, ballverluste: 0, plusMinus: 0, kontakte: 0,
   proEinsatz: null, bullyQ: null, passQ: null,
@@ -3845,6 +4104,7 @@ function computeStats(range = null) {
   for (const id in stintsOf) get(id).einsaetze = stintsOf[id].size;
 
   const passes = [];   // { from, to, line }
+  const rueckLine = {}; // Reihe -> { ballgewinne, loseBaelle } (Reihe beim ersten Kontakt)
   const contacts = []; // { id, line }
   let chainsOpen = 0;
   for (const ev of events) {
@@ -3855,6 +4115,8 @@ function computeStats(range = null) {
         break;
       case 'tor':
       case 'gegentor':
+        // Penalty-Tore: zählen für den Spielstand, aber nicht für Plus/Minus und nicht für die Reihe auf dem Feld
+        if (ev.penalty) break;
         for (const id of ev.aufDemFeld) get(id).plusMinus += ev.typ === 'tor' ? 1 : -1;
         getL(lineAt(ev.time) || '_')[ev.typ === 'tor' ? 'tore' : 'gegentore']++;
         // Ein Gegentor zählt auch als Gegnerschuss, wenn ±3 s keiner erfasst ist
@@ -3881,6 +4143,12 @@ function computeStats(range = null) {
         const last = get(k[k.length - 1].spieler);
         // Ballgewinn nur bei gedrückter Taste A (nicht aus einer Vorauswahl älterer Daten)
         if (ev.start === 'ballgewinn' && !ev.startVorauswahl) get(k[0].spieler).ballgewinne++;
+        // Lose Bälle: erster Spieler einer Kette mit Start „loser Ball“ (Taste G); Reihe beim ersten Kontakt
+        if (ev.start === 'loserBall') get(k[0].spieler).loseBaelle++;
+        if (istRueckeroberung(ev)) {
+          const lk = lineAt(k[0].time) || '_', o = rueckLine[lk] || (rueckLine[lk] = { ballgewinne: 0, loseBaelle: 0 });
+          o[ev.start === 'loserBall' ? 'loseBaelle' : 'ballgewinne']++;
+        }
         if (ev.ende === 'fehlpass') last.fehlpaesse++;
         if (ev.ende === 'ballverlust') last.ballverluste++;
         if (ev.ende === 'schuss') {
@@ -3892,11 +4160,18 @@ function computeStats(range = null) {
     }
   }
 
+  // Ballgewinne/lose Bälle je Reihe (nur bestehende Reihenzeilen, damit keine neuen Zeilen entstehen)
+  for (const [lk, o] of Object.entries(rueckLine)) if (L[lk]) Object.assign(L[lk], o);
   for (const p of Object.values(P)) {
     p.proEinsatz = p.einsaetze ? p.eiszeit / p.einsaetze : null;
     p.schuesse = p.s_tor + p.s_gehalten + p.s_geblockt + p.s_vorbei;
     p.bullyQ = p.bullyG + p.bullyV ? p.bullyG / (p.bullyG + p.bullyV) : null;
     p.passQ = p.paesse + p.fehlpaesse ? p.paesse / (p.paesse + p.fehlpaesse) : null;
+    // Rückeroberungen = Ballgewinne + lose Bälle; Ballbilanz = Rückeroberungen − (Fehlpässe + Ballverluste);
+    // Verluste je 10 Ballkontakte. Weggeschlagen und Schüsse sind keine Verluste.
+    p.rueckeroberungen = p.ballgewinne + p.loseBaelle;
+    p.ballbilanz = p.rueckeroberungen - (p.fehlpaesse + p.ballverluste);
+    p.verluste10 = p.kontakte ? (p.fehlpaesse + p.ballverluste) / p.kontakte * 10 : null;
   }
 
   // Reihen pro Spieler: laut Besetzung(en) des Bereichs plus tatsächliche Einsätze
@@ -3933,7 +4208,7 @@ function computeStats(range = null) {
 }
 
 const emptyLineStats = key => ({ key, eiszeit: 0, spielzeit: 0, schuesse: 0, gegnerschuesse: 0, tore: 0, gegentore: 0,
-  cf: 0, ca: 0, bbZeit: 0, bbGesch: 0, laengstePhase: 0, konter: 0, pressN: 0, pressOk: 0, schichtCa10: null });
+  cf: 0, ca: 0, bbZeit: 0, bbGesch: 0, laengstePhase: 0, konter: 0, pressN: 0, pressOk: 0, schichtCa10: null, ballgewinne: 0, loseBaelle: 0 });
 
 // ======================================================================
 // Erweiterte Kennzahlen (nur aus vorhandenen Ereignissen berechnet)
@@ -3942,7 +4217,7 @@ const emptyLineStats = key => ({ key, eiszeit: 0, spielzeit: 0, schuesse: 0, geg
 const SITS = ['gleich', 'uez', 'uz', 'spez'];
 const sitLabel = s => ({ gleich: game.modus === 'KF' ? 'gleiche Stärke' : '5 gegen 5', uez: 'Überzahl', uz: 'Unterzahl', spez: 'Spezial' })[s];
 // Situation aus der Reihe auf dem Feld
-const sitOf = line => line === 'UEZ' ? 'uez' : line === 'UZ' ? 'uz' : line === 'SPEZ' ? 'spez' : 'gleich';
+const sitOf = line => (lineDef(line) || {}).sit || 'gleich';
 const pctOf = (a, b) => (a + b) ? a / (a + b) : null;
 const perTen = (n, sec) => sec > 0 ? n / (sec / 600) : null;
 const median = list => { if (!list.length) return null; const s = [...list].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -3954,7 +4229,7 @@ const phaseStats = list => ({ n: list.length, avg: list.length ? list.reduce((a,
 function ownShots() {
   const out = events.filter(e => e.typ === 'ballbesitz' && e.ende === 'schuss' && e.kette.length).map(e => ({
     time: e.tEnde ?? e.time, erg: e.schussErgebnis || null, ev: e, schuetze: e.kette[e.kette.length - 1].spieler }));
-  for (const t of events.filter(e => e.typ === 'tor')) {
+  for (const t of events.filter(e => e.typ === 'tor' && !e.penalty)) { // Penalty-Tore sind keine Schussversuche (Corsi/Fenwick)
     if (!out.some(s => s.erg === 'tor' && Math.abs(s.time - t.time) <= KZ.DUBLETTE_S)) {
       out.push({ time: t.time, erg: 'tor', ev: t, schuetze: t.schuetze || null, nurD1: true });
     }
@@ -3967,7 +4242,7 @@ function ownShots() {
 function oppAttempts() {
   const gs = events.filter(e => e.typ === 'gegnerschuss');
   const out = gs.map(e => ({ time: e.time, tor: false, ev: e }));
-  for (const g of events.filter(e => e.typ === 'gegentor')) {
+  for (const g of events.filter(e => e.typ === 'gegentor' && !e.penalty)) { // Penalty-Gegentore zählen nicht (Corsi/Fenwick)
     const near = out.find(o => !o.tor && o.ev.typ === 'gegnerschuss' && Math.abs(o.time - g.time) <= KZ.DUBLETTE_S);
     if (near) { near.tor = true; near.torEv = g; } else out.push({ time: g.time, tor: true, ev: g, torEv: g });
   }
@@ -4289,15 +4564,23 @@ function computeUeberUnterzahl(st, range, L) {
   const zaehlt = d => ['2', '2+2', '5', 'MS'].includes(String(d));
   const strafen = events.filter(e => e.typ === 'strafe' && inRange(e.time) && zaehlt(e.dauer));
   const res = {};
+  // ÜZ und ÜZ 2 bzw. UZ und UZ 2 zusammengefasst (Reihen mit derselben Situation laut LINES)
   for (const [key, sit, team] of [['UEZ', 'uez', 'gegner'], ['UZ', 'uz', 'ulm']]) {
-    const c = (L[key] && L[key].corsi[sit]) || { cf: 0, ca: 0, gf: 0, ga: 0, ereignisse: [] };
+    const keys = linesOfSit(sit);
+    const c = { cf: 0, ca: 0, gf: 0, ga: 0, ereignisse: [] };
+    for (const k of keys) {
+      const x = L[k] && L[k].corsi[sit];
+      if (!x) continue;
+      c.cf += x.cf; c.ca += x.ca; c.gf += x.gf; c.ga += x.ga; c.ereignisse.push(...x.ereignisse);
+    }
     const anzahl = strafen.filter(s => s.team === team).length;
-    const chains = chainsSorted().filter(e => inRange(e.tStart) && lineAt(e.kette[0].time) === key);
+    const chains = chainsSorted().filter(e => inRange(e.tStart) && keys.includes(lineAt(e.kette[0].time)));
     const paesse = chains.reduce((s, e) => s + e.kette.length - 1, 0);
-    const zeit = (st.lines[key] || {}).spielzeit || 0;
+    const zeit = keys.reduce((s, k) => s + ((st.lines[k] || {}).spielzeit || 0), 0);
+    const bbGesch = keys.reduce((s, k) => s + ((L[k] || {}).bbGesch || 0), 0);
     res[key] = { anzahl, strafen: strafen.filter(s => s.team === team), zeit, cf: c.cf, ca: c.ca, gf: c.gf, ga: c.ga,
       ereignisse: c.ereignisse, ketten: chains.length, paesse, paesseProBallbesitz: chains.length ? paesse / chains.length : null,
-      bbAnteil: zeit && L[key] ? L[key].bbGesch / zeit : null,
+      keys, bbAnteil: zeit ? bbGesch / zeit : null,
       quote: key === 'UEZ' ? (anzahl ? c.gf / anzahl : null) : (anzahl ? 1 - c.ga / anzahl : null) };
   }
   return res;
@@ -4478,6 +4761,8 @@ const PLAYER_COLS = [
   { head: 'Einsätze', key: 'einsaetze', title: 'Jeder Reihen-Einsatz zählt einzeln, auch ohne Verlassen des Feldes.' },
   { head: 'Ø Einsatz', key: 'proEinsatz', time: true },
   { head: 'Ballgewinne', key: 'ballgewinne' },
+  { head: 'Lose Bälle', key: 'loseBaelle', exp: 'loseBaelle', title: 'Erster Spieler einer Kette mit Start „loser Ball“ (Taste G)' },
+  { head: 'Rück-eroberungen', key: 'rueckeroberungen', exp: 'loseBaelle', title: 'Ballgewinne + lose Bälle' },
   { head: 'Schuss Tor', key: 's_tor' },
   { head: 'gehalten', key: 's_gehalten' },
   { head: 'geblockt', key: 's_geblockt' },
@@ -4541,7 +4826,7 @@ function lineRows(st, keys) {
   }
   const total = { ...emptyLineStats('gesamt'), label: 'Gesamt' };
   for (const r of rows) for (const k of ['eiszeit', 'spielzeit', 'schuesse', 'gegnerschuesse', 'tore', 'gegentore', 'cf', 'ca', 'bbZeit', 'bbGesch',
-    'konter', 'pressN', 'pressOk', 'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa']) total[k] = (total[k] || 0) + (r[k] || 0);
+    'konter', 'pressN', 'pressOk', 'ballgewinne', 'loseBaelle', 'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa']) total[k] = (total[k] || 0) + (r[k] || 0);
   total.laengstePhase = Math.max(0, ...rows.map(r => r.laengstePhase || 0));
   total.bbN = st.kz ? st.kz.team.bbN || 0 : 0; // Ketten des Teams (eine Kette kann über einen Wechsel gehen)
   return { rows, total };
@@ -4569,6 +4854,22 @@ const LINE_COLS = [
     title: `Anteil der Fehlpässe/Ballverluste, nach denen ≤ ${KZ.GEGENPRESSING_S} s eine eigene Kette mit Start Ballgewinn oder loser Ball beginnt` },
   { head: 'CA/10 je Schichtphase', key: 'schicht', text: true, clipText: true, exp: 'erweiterteKennzahlen', title: 'Gegnerschüsse pro 10 min in den Schichtphasen 0–45 s · 45–90 s · über 90 s',
     fn: r => r.schichtCa10 ? r.schichtCa10.map(v => v == null ? '–' : v.toLocaleString('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 })).join(' · ') : '' },
+  { head: 'Lose Bälle', key: 'loseBaelle', exp: 'loseBaelle', title: 'Ketten mit Start „loser Ball“ (Reihe beim ersten Kontakt)' },
+  { head: 'Lose Bälle / 10 min', key: 'loseBaelle10', dec1: true, exp: 'loseBaelle', fn: r => per10(r.loseBaelle || 0, feat('spielzeitGeschaetzt') ? r.spielzeit : r.eiszeit) },
+  { head: 'Rück-eroberungen', key: 'rueck', exp: 'loseBaelle', fn: r => (r.ballgewinne || 0) + (r.loseBaelle || 0), title: 'Ballgewinne + lose Bälle' },
+  { head: 'Rück-eroberungen / 10 min', key: 'rueck10', dec1: true, exp: 'loseBaelle',
+    fn: r => per10((r.ballgewinne || 0) + (r.loseBaelle || 0), feat('spielzeitGeschaetzt') ? r.spielzeit : r.eiszeit) },
+];
+
+// Ballsicherheit (Schalter ballbilanz): Ballbilanz = (Ballgewinne + lose Bälle) − (Fehlpässe + Ballverluste)
+const BALLSICHERHEIT_COLS = [
+  { head: 'Nr', key: 'nummer', text: true }, { head: 'Name', key: 'name', text: true },
+  { head: 'Ballgewinne', key: 'ballgewinne' }, { head: 'Lose Bälle', key: 'loseBaelle' },
+  { head: 'Fehlpässe', key: 'fehlpaesse' }, { head: 'Ballverluste', key: 'ballverluste' },
+  { head: 'Ballbilanz', key: 'ballbilanz', signed: true, title: '(Ballgewinne + lose Bälle) − (Fehlpässe + Ballverluste); weggeschlagen und Schüsse zählen nicht als Verlust' },
+  { head: 'Ballbilanz / 10', key: 'ballbilanz10', dec1: true, fn: r => r.ballbilanz ? per10(r.ballbilanz, feat('spielzeitGeschaetzt') ? r.spielzeit : r.eiszeit) : null },
+  { head: 'Ballkontakte', key: 'kontakte' },
+  { head: 'Verluste je 10 Kontakte', key: 'verluste10', dec1: true, title: '(Fehlpässe + Ballverluste) ÷ Ballkontakte × 10 – vergleicht fair, wer viel am Ball ist' },
 ];
 
 function colValue(c, r) {
@@ -4619,7 +4920,7 @@ function matrixData(st, lineFilter, fixedOrder) {
 
 function plausibility(st) {
   const out = [];
-  const toreD1 = events.filter(e => e.typ === 'tor').length;
+  const toreD1 = events.filter(e => e.typ === 'tor' && !e.penalty).length; // Penalty-Tore haben keine Kette in Durchgang 2
   const toreD2 = events.filter(e => e.typ === 'ballbesitz' && e.ende === 'schuss' && e.schussErgebnis === 'tor').length;
   out.push(toreD1 === toreD2
     ? { ok: true, text: `Tore stimmen überein: ${toreD1} in Durchgang 1, ${toreD2} Schüsse mit Ergebnis Tor in Durchgang 2.` }
@@ -4719,7 +5020,7 @@ function berichtChecks(out) {
     const r = ref[diff], e = erfasst[diff];
     out.push({ ok: false,
       text: `${zahl}. Erste Abweichung beim ${diff + 1}. Eintrag: Bericht ` +
-        (r ? `${teamTxt(r.team)} (${periodLabel(r.periode)} ${r.zeit})` : '– (kein weiterer)') + ', erfasst ' +
+        (r ? `${teamTxt(r.team)} (${periodLabel(r.periode)} ${r.zeit}${name === 'Tore' && berichtPenalty(r) ? ', laut Bericht Penalty' : ''})` : '– (kein weiterer)') + ', erfasst ' +
         (e ? `${teamTxt(e.team)} bei ${fmtTime(e.time)}${e.periode ? ` (${periodLabel(e.periode)})` : ''}` : '– (keiner)') + '.',
       jumps: e ? [{ t0: e.time, t1: e.time }] : null });
   };
@@ -4774,10 +5075,20 @@ function renderStats() {
     if (!v) return;
     openPlaylist(`Alle Schüsse von ${pl(v)}`, ownShots().filter(x => inR(range, x.time) && x.schuetze === v).map(x => ({ x })));
   });
+  // Markierte Szenen (Schalter markierungen): alle oder je Kategorie
+  const marks = feat('markierungen') ? events.filter(e => e.typ === 'markierung' && inR(range, e.time)) : [];
+  const markSel = !marks.length ? null : selectEl([['', `Markierte Szenen${expMark('markierungen')} (${marks.length}) …`], ['*', `Alle markierten Szenen (${marks.length})`],
+    ...MARK_KAT.map(([k, l]) => [k, `${l} (${marks.filter(m => m.kategorie === k).length})`]).filter(o => !o[1].endsWith('(0)')),
+    ...(marks.some(m => !m.kategorie) ? [['-', `ohne Kategorie (${marks.filter(m => !m.kategorie).length})`]] : [])], '', v => {
+    if (!v) return;
+    const list = marks.filter(m => v === '*' || (v === '-' ? !m.kategorie : m.kategorie === v));
+    openPlaylist(`Markierte Szenen${v === '*' ? '' : ' – ' + (v === '-' ? 'ohne Kategorie' : markKategorieLabel(v))}`, list.map(ev => ({ ev })));
+  });
   const quick = !feat('playlist') ? null : h('div', { class: 'statsBar', style: 'margin-top:8px' }, 'Szenen' + expMark('playlist') + ': ',
     h('button', { onclick: () => openPlaylist(`Alle Tore – ${pLabel2}`, goalItems('tor')) }, '▶ Alle Tore'),
     h('button', { onclick: () => openPlaylist(`Alle Gegentore – ${pLabel2}`, goalItems('gegentor')) }, '▶ Alle Gegentore'),
     shooterSel,
+    markSel,
     h('span', { class: 'hint' }, 'Tipp: Jede Zahl in den Tabellen ist anklickbar und spielt die zugehörigen Szenen ab.'));
 
   root.append(
@@ -4801,6 +5112,12 @@ function renderStats() {
     panel('Plausibilitätschecks (ganzes Spiel)', renderChecks(plausibility(all))),
     panel(`Spieler – ${pLabel2}`, h('div', { class: 'tableWrap' }, renderPlayerTable(st))),
     panel(`Reihenvergleich – ${pLabel2}`, h('div', { class: 'tableWrap' }, renderLineTable(st))),
+    ...(penaltiesIn(range).length ? [panel(`Penaltys – ${pLabel2}`, renderPenaltyTable(range))] : []),
+    ...(feat('ballbilanz') ? [panel(`Ballsicherheit${expMark('ballbilanz')} – ${pLabel2}`, h('div', null,
+      h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Ballbilanz = (Ballgewinne + lose Bälle) − (Fehlpässe + Ballverluste). ' +
+        'Weggeschlagen und Schüsse zählen nicht als Verlust. Verluste je 10 Ballkontakte vergleichen fair, wer viel am Ball ist.'),
+      h('div', { class: 'tableWrap' }, statsTable(BALLSICHERHEIT_COLS, playerRows(st).filter(r => r.group === 'F' && (r.kontakte || r.ballgewinne || r.loseBaelle)),
+        { clip: (r, c) => playerEvidence(st, r.id, c.key) }))))] : []),
     ...(feat('gegnerschussErgebnis') ? [
       panel(`Gegnerschüsse nach Reihe${expMark('gegnerschussErgebnis')} – ${pLabel2}`, h('div', null,
         h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Gehalten = aufs Tor, Torwart hält (auch abgefälscht) · geblockt = von einem Ulmer Feldspieler ' +
@@ -4832,7 +5149,8 @@ function renderStats() {
 // ======================================================================
 
 // Vorlauf/Nachlauf in Sekunden je Ereignistyp
-const CLIP_VN = { tor: [7, 3], gegentor: [7, 3], schuss: [5, 2], gegnerschuss: [5, 2], verlust: [4, 4], bully: [2, 6], kette: [2, 2], sonst: [4, 3] };
+const CLIP_VN = { tor: [7, 3], gegentor: [7, 3], schuss: [5, 2], gegnerschuss: [5, 2], verlust: [4, 4], bully: [2, 6], kette: [2, 2], sonst: [4, 3],
+  markierung: [8, 4] }; // Markierung: pro Szene änderbar
 
 // Szenen-Bausteine („Belege“):
 //   { chain, mode: 'kette' | 'verlust' | 'schuss' }  Ballbesitzkette
@@ -4864,6 +5182,10 @@ function clipOf(item) {
     const e = item.ev;
     const kind = { tor: 'tor', gegentor: 'gegentor', gegnerschuss: 'gegnerschuss', bully: 'bully' }[e.typ] || 'sonst';
     if (e.typ === 'ballbesitz') return clipOf({ chain: e });
+    if (e.typ === 'markierung') { // Vorlauf/Nachlauf pro Markierung änderbar
+      const [v, n] = CLIP_VN.markierung;
+      return { t0: e.time - (e.vorlauf ?? v), t1: e.time + (e.nachlauf ?? n), t: e.time, label: `Markierung – ${describe(e)}` };
+    }
     return around(e.time, kind, evLabel(e));
   }
   return null;
@@ -5028,6 +5350,15 @@ function playerEvidence(st, id, key) {
       return segSpans(st, s => s.ids.includes(id), 'auf dem Feld');
     case 'ballgewinne':
       return chainsWhere(r, c => c.start === 'ballgewinn' && !c.startVorauswahl && c.kette[0].spieler === id).map(chain => ({ chain }));
+    case 'loseBaelle':
+      return chainsWhere(r, c => c.start === 'loserBall' && c.kette[0].spieler === id).map(chain => ({ chain }));
+    case 'rueckeroberungen':
+      return chainsWhere(r, c => istRueckeroberung(c) && c.kette[0].spieler === id).map(chain => ({ chain }));
+    case 'ballbilanz': case 'ballbilanz10':
+      return chainsWhere(r, c => (istRueckeroberung(c) && c.kette[0].spieler === id) ||
+        (['fehlpass', 'ballverlust'].includes(c.ende) && lastOf(c) === id)).map(chain => ({ chain }));
+    case 'kontakte': case 'verluste10':
+      return chainsWhere(r, c => c.kette.some(k => k.spieler === id)).map(chain => ({ chain }));
     case 's_tor': case 's_gehalten': case 's_geblockt': case 's_vorbei': case 'schuesse':
       return chainsWhere(r, c => c.ende === 'schuss' && lastOf(c) === id && (key === 'schuesse' || c.schussErgebnis === key.slice(2)))
         .map(chain => ({ chain, mode: 'schuss' }));
@@ -5058,6 +5389,10 @@ function lineEvidence(st, key, col) {
   const r = st.range, k = st.kz.L[key];
   const isKey = l => key == null || (l || '_') === key;
   switch (col) {
+    case 'loseBaelle': case 'loseBaelle10':
+      return chainsWhere(r, c => c.start === 'loserBall' && isKey(lineAt(c.kette[0].time))).map(chain => ({ chain }));
+    case 'rueck': case 'rueck10':
+      return chainsWhere(r, c => istRueckeroberung(c) && isKey(lineAt(c.kette[0].time))).map(chain => ({ chain }));
     case 'eiszeit': case 'spielzeit': case 'label':
       return segSpans(st, s => isKey(s.line), key ? lineRowLabel(key) : 'Reihe auf dem Feld');
     case 'schuesse':
@@ -5065,7 +5400,7 @@ function lineEvidence(st, key, col) {
     case 'gegnerschuesse':
       return oppAttempts().filter(a => inR(r, a.time) && isKey(a.ev.typ === 'gegnerschuss' ? a.ev.reiheAufFeld : lineAt(a.time))).map(x => ({ x }));
     case 'tore': case 'gegentore':
-      return goalsWhere(r, e => e.typ === (col === 'tore' ? 'tor' : 'gegentor') && isKey(lineAt(e.time)));
+      return goalsWhere(r, e => !e.penalty && e.typ === (col === 'tore' ? 'tor' : 'gegentor') && isKey(lineAt(e.time)));
     case 'cfPct':
       return (key ? (k ? SITS.flatMap(s => k.corsi[s].ereignisse) : []) : SITS.flatMap(s => st.kz.team.corsi[s].ereignisse)).map(x => ({ x }));
     case 'bbAnteil':
@@ -5193,13 +5528,13 @@ function renderKzUeberzahl(st, out) {
     const own = e => 'erg' in e;
     switch (col.key) {
       case 'anzahl': return r.strafen.map(ev => ({ ev }));
-      case 'zeit': return segSpans(st, s => s.line === r.key, r.label);
+      case 'zeit': return segSpans(st, s => r.keys.includes(s.line), r.label);
       case 'cf': return r.ereignisse.filter(own).map(x => ({ x }));
       case 'ca': return r.ereignisse.filter(e => !own(e)).map(x => ({ x }));
       case 'gf': return r.ereignisse.filter(e => own(e) && e.erg === 'tor').map(x => ({ x }));
       case 'ga': case 'quote': return r.key === 'UZ' ? r.ereignisse.filter(e => !own(e) && e.tor).map(x => ({ x }))
         : r.ereignisse.filter(e => own(e) && e.erg === 'tor').map(x => ({ x }));
-      default: return chainsWhere(st.range, c => lineAt(c.kette[0].time) === r.key).map(chain => ({ chain }));
+      default: return chainsWhere(st.range, c => r.keys.includes(lineAt(c.kette[0].time))).map(chain => ({ chain }));
     }
   };
   const cols = [
@@ -5319,7 +5654,7 @@ function renderKzUmschalten(st, out) {
 
 function renderKzSchichten(st) {
   const sv = st.kz.schichten;
-  const keys = ['1', '2', '3', 'UEZ', 'UZ', 'SPEZ'].filter(k => sv[k]);
+  const keys = LINES.map(l => l.key).filter(k => sv[k]);
   if (!keys.length) return h('p', { class: 'placeholder' }, 'Keine Schichten im gewählten Zeitraum.');
   const [g1, g2] = KZ.SCHICHTPHASEN_S;
   const names = [`0–${g1} s`, `${g1}–${g2} s`, `über ${g2} s`];
@@ -5349,7 +5684,7 @@ function renderKzSchichten(st) {
     h('p', { class: 'hint' }, `Netto-Sekunden seit Schichtbeginn (Stillstände abgezogen). Pro 10 min geschätzter Spielzeit; ` +
       'grau/kursiv = weniger als 2 min Spielzeit (kleine Stichprobe).'),
     h('div', { class: 'tableWrap' }, table),
-    renderSchichtChart(sv, keys.filter(k => ['1', '2', '3'].includes(k)), names));
+    renderSchichtChart(sv, keys.filter(k => !lineDef(k).special), names));
 }
 
 // Kleines gruppiertes Balkendiagramm: je Reihe drei Schichtphasen, je Phase CF/10 und CA/10
@@ -5649,6 +5984,29 @@ function renderGoalieTable(st) {
   ], rows, { clip: (r, c) => playerEvidence(st, r.id, c.key) });
 }
 
+// Penaltys (Strafschüsse): Übersicht; Penalty-Tore zählen nicht für Plus/Minus, Corsi und die Reihe
+const penaltiesIn = range => events.filter(e => e.typ === 'penalty' && inR(range, e.time));
+function penaltySummary(list) {
+  const f = list.filter(p => p.team === 'ulm'), g = list.filter(p => p.team === 'gegner');
+  const tore = l => l.filter(p => p.ergebnis === 'tor').length;
+  return `${list.length} Penalty(s): VfB ${f.length} (${tore(f)} Tor${tore(f) === 1 ? '' : 'e'}), Gegner ${g.length} (${tore(g)} Tor${tore(g) === 1 ? '' : 'e'})`;
+}
+const penaltyRow = p => ({
+  zeit: fmtTime(p.time, true), team: p.team === 'ulm' ? 'VfB' : 'Gegner',
+  schuetze: p.team === 'ulm' ? (p.schuetze ? pl(p.schuetze) : '–') : (p.schuetze ? '#' + p.schuetze : '–'),
+  torwart: p.team === 'gegner' ? (p.torwart ? pl(p.torwart) : '–') : (p.torwart ? '#' + p.torwart : '–'),
+  ergebnis: penaltyErgLabel(p.ergebnis),
+});
+function renderPenaltyTable(range) {
+  const list = penaltiesIn(range);
+  const cols = [{ head: 'Zeit', key: 'zeit', text: true }, { head: 'für', key: 'team', text: true },
+    { head: 'Schütze', key: 'schuetze', text: true }, { head: 'Torwart', key: 'torwart', text: true }, { head: 'Ergebnis', key: 'ergebnis', text: true }];
+  return h('div', null,
+    h('p', { class: 'hint', style: 'margin:0 0 6px' }, penaltySummary(list) +
+      '. Penalty-Tore zählen für den Spielstand, aber nicht für Plus/Minus, Corsi/Fenwick und nicht für die Reihe auf dem Feld.'),
+    h('div', { class: 'tableWrap' }, statsTable(cols, list.map(penaltyRow))));
+}
+
 function renderMatrix(st) {
   const { order, m, total } = matrixData(st, statsUI.matrixLine);
   if (!order.length) return h('p', { class: 'placeholder' }, 'Keine Pässe für diese Auswahl.');
@@ -5821,7 +6179,7 @@ function exportGroups(gesamt) {
   const groups = [];
   const used = new Set();
   const active = id => { const p = gesamt.players[id]; return !!p && (p.eiszeit > 0 || p.kontakte > 0 || p.bullyG + p.bullyV > 0); };
-  for (const key of ['1', '2', '3']) {
+  for (const key of LINES.filter(l => !l.special).map(l => l.key)) {
     const ids = game.reihen[key].slots.map(s => s.id)
       .filter(id => id && !used.has(id) && findPlayer(id) && findPlayer(id).position !== 'TW');
     ids.forEach(id => used.add(id));
@@ -5860,7 +6218,7 @@ function computeShifts() {
       if (cur && cur.key === ev.reihe) continue; // Doppeldruck
       close(ev.time);
       open(ev.time);
-    } else if ((ev.typ === 'tor' || ev.typ === 'gegentor') && cur) {
+    } else if ((ev.typ === 'tor' || ev.typ === 'gegentor') && !ev.penalty && cur) { // Penalty-Tor färbt keine Schicht
       cur[ev.typ] = true;
     }
   }
@@ -5906,6 +6264,11 @@ const XL_STAT_ROWS = [
   [null, 'Fenwick gegen (Feld)', 'KZ', 'num', 'faOn', 'gegnerschussErgebnis'],
   [null, 'Paraden (TW)', 'KZ', 'num', 'paraden', 'gegnerschussErgebnis'],
   [null, 'Fangquote (TW)', 'KZ', 'pctTw', 'fangquote', 'gegnerschussErgebnis'],
+  [null, 'Lose Bälle', 'KZ', 'val', 'loseBaelle', 'loseBaelle'],
+  [null, 'Rückeroberungen', 'KZ', 'val', 'rueckeroberungen', 'loseBaelle'],
+  [null, 'Ballbilanz', 'KZ', 'pm', 'ballbilanz', 'ballbilanz'],
+  [null, 'Ballbilanz /10′', 'KZ', 'rate10', 'ballbilanz', 'ballbilanz'],
+  [null, 'Verluste je 10 Kontakte', 'KZ', 'dec1', 'verluste10', 'ballbilanz'],
 ];
 
 // Zeilen des Statistik-Blatts im aktuellen Modus (Kennzahlen-Block mit β)
@@ -5963,7 +6326,7 @@ function buildStatSheet(wb, title, st, groups, shifts) {
       let v;
       if (kind === 'time') v = (p[field] || 0) / SEC_PER_DAY;
       else if (kind === 'val' || kind === 'pm') v = p[field] || 0;
-      else if (kind === 'num' || kind === 'pct' || kind === 'pctTw') v = p[field] == null ? '' : p[field];
+      else if (kind === 'num' || kind === 'pct' || kind === 'pctTw' || kind === 'dec1') v = p[field] == null ? '' : p[field];
       else if (kind === 'rate10') v = p[field] ? per10(p[field], p.spielzeit) ?? '' : '';
       else if (kind === 'pp') v = p[field] == null ? '' : Math.round(p[field] * 1000) / 10; // Prozentpunkte
       else if (kind === 'cfq') {
@@ -6002,7 +6365,7 @@ function buildStatSheet(wb, title, st, groups, shifts) {
       const x = cell(r, c);
       if (kind === 'time' || kind === 'perEinsatz') x.numFmt = '[m]:ss';
       else if (kind === 'quote' || kind === 'cfq' || kind === 'pct' || kind === 'pctTw') x.numFmt = '0%';
-      else if (kind === 'rate10') x.numFmt = '0.0';
+      else if (kind === 'rate10' || kind === 'dec1') x.numFmt = '0.0';
       else if (kind === 'pp') x.numFmt = '+0" PP";-0" PP";0" PP"';
       else if (kind === 'diff' || kind === 'pm') x.numFmt = '+0;-0;0';
       x.alignment = { horizontal: 'center' };
@@ -6064,7 +6427,12 @@ function buildStatSheet(wb, title, st, groups, shifts) {
   put(rv, 1, 'Reihenvergleich', { font: xlFont({ bold: true }) });
   put(rv, 5, sz ? '/10′ = pro 10 Minuten geschätzter Spielzeit (Spalte M)' : '/10′ = pro 10 Minuten Eiszeit', muted);
   const [g1, g2] = KZ.SCHICHTPHASEN_S;
-  const lineKeys = ['1', '2', '3', 'UEZ', 'UZ', ...['SPEZ', '_'].filter(k => st.lines[k] && st.lines[k].eiszeit > 0)];
+  // Reihe 1–3, ÜZ, UZ immer; Spezial, ÜZ 2, UZ 2 und „ohne Reihe“ nur mit Eiszeit (Reihenfolge laut LINES)
+  const hatEiszeit = k => st.lines[k] && st.lines[k].eiszeit > 0;
+  const lineKeys = [...LINES.filter(l => (!l.optional && l.key !== 'SPEZ') || hatEiszeit(l.key)).map(l => l.key), ...(hatEiszeit('_') ? ['_'] : [])];
+  // Trennlinie nach der letzten normalen Reihe und nach der letzten ÜZ-/UZ-Reihe
+  const lineGroup = k => { const l = lineDef(k); return !l ? 'x' : !l.special ? 'n' : (l.sit === 'uez' || l.sit === 'uz') ? 'pp' : 'x'; };
+  const isGroupEnd = i => ['n', 'pp'].includes(lineGroup(lineKeys[i])) && lineGroup(lineKeys[i + 1]) !== lineGroup(lineKeys[i]);
   const first = rv + 2, lastLine = first + lineKeys.length - 1, gRow = lastLine + 1;
   const orDash = v => v == null ? '–' : v;
   // Zusatzspalten: { head, f: Schalter, val(x, isTotal, c), fmt, agg: 'sum' | 'max', n(x) }
@@ -6083,6 +6451,14 @@ function buildStatSheet(wb, title, st, groups, shifts) {
     addQuote('Gegen-pressing', 'kennzahlenExport', x => x.pressN ? x.pressOk / x.pressN : null, x => x.pressN);
     [`CA/10′ 0–${g1} s`, `CA/10′ ${g1}–${g2} s`, `CA/10′ über ${g2} s`].forEach((head, j) => ext.push({ head, f: 'kennzahlenExport', fmt: '0.0',
       val: (x, isTotal) => isTotal ? '' : orDash(x.schichtCa10 ? x.schichtCa10[j] : null) }));
+  }
+  if (kzx && feat('loseBaelle')) {
+    // Lose Bälle und Rückeroberungen (Ballgewinne + lose Bälle), Reihe beim ersten Kontakt
+    const f = 'loseBaelle', zeit = x => sz ? x.spielzeit : x.eiszeit, rueck = x => (x.ballgewinne || 0) + (x.loseBaelle || 0);
+    ext.push({ head: 'Lose Bälle', f, val: x => x.loseBaelle || 0, fmt: '0', agg: 'sum' },
+      { head: 'Lose Bälle /10′', f, val: x => orDash(per10(x.loseBaelle || 0, zeit(x))), fmt: '0.0' },
+      { head: 'Rück-eroberungen', f, val: rueck, fmt: '0', agg: 'sum' },
+      { head: 'Rück-eroberungen /10′', f, val: x => orDash(per10(rueck(x), zeit(x))), fmt: '0.0' });
   }
   if (kzx && feat('gegnerschussErgebnis')) {
     // Gegnerschüsse nach Ergebnis (Gegentore = aufs Tor); Quoten nur über bekannte Ergebnisse; Fenwick = ohne geblockte
@@ -6111,7 +6487,7 @@ function buildStatSheet(wb, title, st, groups, shifts) {
   const zeitCol = sz ? 'M' : 'C';
   const xlPer10 = (cntCol, r, n, sec) => xlF(`IFERROR(${colL(cntCol)}${r}/(${zeitCol}${r}*144),"–")`, sec > 0 ? n / (sec / 600) : '–');
   const sumOf = ['eiszeit', 'spielzeit', 'schuesse', 'gegnerschuesse', 'tore', 'gegentore', 'cf', 'ca', 'bbGesch', 'konter', 'pressN', 'pressOk',
-    'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa'];
+    'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa', 'ballgewinne', 'loseBaelle'];
   const totals = { ...Object.fromEntries(sumOf.map(f => [f, 0])), laengstePhase: 0, schichtCa10: null,
     bbN: st.kz ? st.kz.team.bbN || 0 : 0 }; // Ketten des Teams (nicht Summe der Reihen)
   const fields = ['schuesse', 'gegnerschuesse', 'tore', 'gegentore'];
@@ -6139,7 +6515,7 @@ function buildStatSheet(wb, title, st, groups, shifts) {
     for (const f of sumOf) totals[f] += x[f] || 0;
     totals.laengstePhase = Math.max(totals.laengstePhase, x.laengstePhase || 0);
     writeLine(first + i, key === '_' ? 'ohne Reihe' : lineLabel(key), x, false);
-    if (i === 2 || i === 4) rvCols.forEach(c => { cell(first + i, c).border = { bottom: THIN }; });
+    if (isGroupEnd(i)) rvCols.forEach(c => { cell(first + i, c).border = { bottom: THIN }; });
   });
   writeLine(gRow, 'Gesamt', totals, true);
   rvCols.forEach(c => { cell(gRow, c).border = { top: MED }; });
@@ -6150,9 +6526,16 @@ function buildStatSheet(wb, title, st, groups, shifts) {
   // Schichtliste
   const sh = gRow + 3;
   put(sh, 1, 'Shifts', { font: xlFont({ bold: true }) });
-  const cols = { 1: 3, 2: 6, 3: 9, UEZ: 13, UZ: 16, SPEZ: 19 };
-  const titles = { 1: 'Reihe 1', 2: 'Reihe 2', 3: 'Reihe 3', UEZ: 'Überzahl', UZ: 'Unterzahl', SPEZ: 'Spezial' };
-  const keys = ['1', '2', '3', 'UEZ', 'UZ', ...(shifts.some(s => s.key === 'SPEZ') ? ['SPEZ'] : [])];
+  // Spalten aus LINES: normale Reihen ab C, Sonderreihen ab M (je 3 Spalten, davor die Spielerkürzel);
+  // Spezial, ÜZ 2 und UZ 2 nur, wenn es Schichten gibt
+  const keys = LINES.filter(l => (!l.optional && l.key !== 'SPEZ') || shifts.some(s => s.key === l.key)).map(l => l.key);
+  const cols = {}, titles = {};
+  let cN = 3, cS = 13;
+  for (const k of keys) {
+    const l = lineDef(k);
+    if (l.special) { cols[k] = cS; cS += 3; } else { cols[k] = cN; cN += 3; }
+    titles[k] = l.title || l.label;
+  }
   keys.forEach(k => put(sh, cols[k], titles[k], { font: xlFont({ bold: true }) }));
   const counters = {};
   let maxn = 0;
@@ -6164,7 +6547,7 @@ function buildStatSheet(wb, title, st, groups, shifts) {
       font: xlFont(s.erster ? { bold: true, underline: true } : {}) });
     if (s.tor) x.fill = xlFill(XL.TOR);
     if (s.gegentor) x.fill = xlFill(XL.GEGENTOR);
-    if (['UEZ', 'UZ', 'SPEZ'].includes(s.key)) {
+    if (lineDef(s.key) && lineDef(s.key).special) {
       put(sh + n, cols[s.key] - 2, s.ids.map(id => findPlayer(id)).filter(Boolean).map(p => firstName(p).slice(0, 3)).join(', '),
         { font: xlFont({ color: xlArgb(XL.DARK) }) });
     }
@@ -6180,6 +6563,20 @@ function buildStatSheet(wb, title, st, groups, shifts) {
     for (const [r, f, res] of [[srow, `SUM(${L}${sh + 1}:${L}${sh + maxn})`, sum], [srow + 1, `AVERAGE(${L}${sh + 1}:${L}${sh + maxn})`, sum / list.length]]) {
       put(r, cols[k], xlF(f, res), { numFmt: '[m]:ss', font: xlFont({ bold: true }), alignment: { horizontal: 'center' }, border: { top: THIN } });
     }
+  }
+
+  // Penaltys (nur Blatt „Gesamt“, nur wenn es welche gibt)
+  const pens = title === 'Gesamt' ? penaltiesIn(null) : [];
+  if (pens.length) {
+    const pr = ws.rowCount + 3;
+    put(pr, 1, 'Penaltys', { font: xlFont({ bold: true }) });
+    put(pr, 3, penaltySummary(pens), { font: xlFont({ italic: true, color: xlArgb(XL.MUTED) }) });
+    ['Zeit', 'für', 'Schütze', 'Torwart', 'Ergebnis'].forEach((t, j) => put(pr + 1, [1, 3, 5, 9, 13][j], t,
+      { font: xlFont({ bold: true }), fill: xlFill(XL.GREY) }));
+    pens.forEach((p, i) => {
+      const r = penaltyRow(p);
+      [r.zeit, r.team, r.schuetze, r.torwart, r.ergebnis].forEach((v, j) => put(pr + 2 + i, [1, 3, 5, 9, 13][j], v, { font: xlFont() }));
+    });
   }
 
   // Spaltenbreiten
@@ -6302,7 +6699,7 @@ function buildPassSheet(wb, gesamt, groups) {
     for (const ev of events) {
       if (ev.typ !== 'ballbesitz' || ev.ende !== 'fehlpass' || !ev.kette.length) continue;
       const last = ev.kette[ev.kette.length - 1];
-      if (key && lineAt(last.time) !== key) continue;
+      if (key && !key.includes(lineAt(last.time))) continue; // key: Liste von Reihen
       f[last.spieler] = (f[last.spieler] || 0) + 1;
     }
     return f;
@@ -6375,15 +6772,16 @@ function buildPassSheet(wb, gesamt, groups) {
   // 2) Je Reihe auf dem Feld, 3) Überzahl (falls Pässe)
   const twIds = goalies().map(p => p.id);
   let top = total.er + 3;
-  const lineBlocks = [['1', 'Reihe 1 auf dem Feld'], ['2', 'Reihe 2 auf dem Feld'], ['3', 'Reihe 3 auf dem Feld'],
-    ...(gesamt.passes.some(p => p.line === 'UEZ') ? [['UEZ', 'Überzahl auf dem Feld']] : [])];
-  for (const [key, title] of lineBlocks) {
+  const uezKeys = linesOfSit('uez');
+  const lineBlocks = [...LINES.filter(l => !l.special).map(l => [[l.key], `${l.label} auf dem Feld`]),
+    ...(gesamt.passes.some(p => uezKeys.includes(p.line)) ? [[uezKeys, 'Überzahl auf dem Feld']] : [])];
+  for (const [keys, title] of lineBlocks) {
     const members = new Set();
-    for (const s of gesamt.segs) if (s.line === key) s.ids.forEach(id => members.add(id));
+    for (const s of gesamt.segs) if (keys.includes(s.line)) s.ids.forEach(id => members.add(id));
     const ids = [...order.filter(id => members.has(id) && !twIds.includes(id)), ...order.filter(id => members.has(id) && twIds.includes(id))];
-    const linePasses = gesamt.passes.filter(p => p.line === key);
+    const linePasses = gesamt.passes.filter(p => keys.includes(p.line));
     if (!ids.length) continue;
-    const blk = matrixBlock(top, title, ids, count(linePasses), fehlpaesse(key), 'jeder Pass zählt zur Reihe, die beim Pass auf dem Feld stand');
+    const blk = matrixBlock(top, title, ids, count(linePasses), fehlpaesse(keys), 'jeder Pass zählt zur Reihe, die beim Pass auf dem Feld stand');
     const L = colL(blk.sc);
     put(blk.er + 1, 1, 'alle Pässe, während diese Reihe auf dem Feld stand', { font: xlFont({ color: xlArgb(XL.DARK) }) });
     put(blk.er + 1, blk.sc, linePasses.length, { font: xlFont({ color: xlArgb(XL.DARK) }), alignment: { horizontal: 'center' } });
@@ -6444,6 +6842,7 @@ function buildEventSheet(wb) {
   // Gegnerschuss mit Gegentor ±3 s gilt als Tor
   const mitTor = new Set(erg ? oppAttempts().filter(x => x.tor && x.ev.typ === 'gegnerschuss').map(x => x.ev.id) : []);
   for (const ev of events) {
+    if (ev.typ === 'markierung' && !feat('markierungen')) continue; // im Standardmodus nicht exportiert
     const g = ev.typ === 'gegnerschuss';
     ws.addRow([fmtTime(ev.time, true), Math.round(ev.time * 10) / 10, periodOf(ev.time),
       TYPES[ev.typ].label, describe(ev), lineLabel(lineAt(ev.time)),
@@ -6452,7 +6851,7 @@ function buildEventSheet(wb) {
   }
   ws.getRow(1).eachCell(c => { c.font = xlFont({ bold: true }); c.fill = xlFill(XL.GREY); });
   [11, 9, 11, 14, 80, 16, 12, 22].slice(0, erg ? 8 : 6).forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-  ws.autoFilter = `A1:${erg ? 'H' : 'F'}${events.length + 1}`;
+  ws.autoFilter = `A1:${erg ? 'H' : 'F'}${ws.rowCount}`;
   return ws;
 }
 
@@ -6516,6 +6915,7 @@ function setView(v) {
   for (const b of document.querySelectorAll('.tabs button')) b.classList.toggle('active', b.dataset.view === v);
   closeBench();
   if (v !== 'erfassung') document.body.classList.remove('evOpen');
+  if (v === 'erfassung') refreshLive(true); // z. B. ÜZ 2/UZ 2 im Setup befüllt
   if (v === 'setup') renderSetup();
   if (v === 'auswertung') renderStats();
   saveSession();
@@ -6542,13 +6942,17 @@ $('backupInput').addEventListener('change', e => {
   e.target.value = '';
 });
 $('btnWin').addEventListener('click', openVideoWindow);
+$('reaktionInput').value = prefs.get('reaktion', 0);
+$('reaktionInput').addEventListener('input', e => { const v = Math.max(0, Math.min(3, +e.target.value || 0)); prefs.set('reaktion', v); updateUI(); });
+$('reaktionInput').addEventListener('change', e => e.target.blur()); // danach wirken die Erfassungstasten wieder
 for (const b of document.querySelectorAll('#anzeigeSeg button')) b.addEventListener('click', () => setAnzeige(b.dataset.anzeige));
 for (const b of document.querySelectorAll('#modusSeg button')) b.addEventListener('click', () => setBetriebsmodus(b.dataset.modus));
+$('btnMark').addEventListener('click', () => capture(actMark));
 $('btnEvDrawer').addEventListener('click', () => { document.body.classList.toggle('evOpen'); renderModeSegs(); });
 $('player').addEventListener('dblclick', () => { if (session.view === 'erfassung') setTheater(!theater); });
 window.addEventListener('resize', layoutPlayer);
 $('captureView').addEventListener('scroll', layoutPlayer, { passive: true });
-new ResizeObserver(layoutPlayer).observe($('playerSlot'));
+new ResizeObserver(() => requestAnimationFrame(layoutPlayer)).observe($('playerSlot')); // rAF: keine Schleifenwarnung
 
 // Buttons nach Klick entfokussieren, damit die Leertaste nicht den Button auslöst.
 document.addEventListener('click', e => {
