@@ -349,6 +349,11 @@
   #ortTools:empty { display: none; }
   #ortTools .ortHint { align-self: center; }
   .ev.o6 { grid-template-columns: 62px 98px 1fr auto auto auto; }
+  .karteRow { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; margin-top: 4px; }
+  .karteHead { font-weight: 600; margin: 4px 0; font-size: 13px; }
+  .karteCanvas { display: block; cursor: crosshair; touch-action: none; }
+  .karteLegende { margin-top: 8px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+  .karteLegende b { font-size: 15px; }
   .ev button.icon.ortOn { color: #3fb6b0; }
   #oppTools .hint { align-self: center; }
 
@@ -1846,6 +1851,60 @@ function rinkClick(canvas, e) {
   const pc = (v, max) => Math.round(Math.max(0, Math.min(100, v / max * 100)) * 10) / 10;
   if (X < -1 || Y < -1 || X > F.laenge + 1 || Y > F.breite + 1) return null; // deutlich außerhalb der Bande
   return { x: pc(X, F.laenge), y: pc(Y, F.breite) };
+}
+
+// Halbfeld (Tor oben, aus Sicht des Schützen) für die Schusskarte und die Excel-Bilder.
+// punkte: shotList-Einträge mit geo; opts: { breite, stil: 'dunkel' | 'druck', scale, titel, sel: Set, rahmen: [x0,y0,x1,y1] }.
+// Speichert die Bildschirmlage der Punkte in canvas._hits für Klick und Rahmen.
+function drawHalfRink(canvas, punkte, opts = {}) {
+  const F = feldMass(), S = RINK_STIL[opts.stil || 'dunkel'];
+  const L = F.laenge, B = F.breite;
+  const w = opts.breite || 300, pad = 8, top = opts.titel ? 22 : pad;
+  const sc = (w - 2 * pad) / B;
+  const hgt = Math.round(top + (L / 2) * sc + pad);
+  const ctx = prepCanvas(canvas, w, hgt, opts.scale);
+  if (opts.stil === 'druck') { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, hgt); }
+  const ox = pad;
+  const tf = (X, Y) => [ox + Y * sc, top + (L - X) * sc];
+  drawRinkLines(ctx, tf, F, S, true);
+  // Zonen zur Orientierung (gestrichelt): Slot, Grenze 12 m, spitzer Winkel
+  const gx = L - F.torlinie, gy = B / 2, hb = slotHalbbreite(F);
+  const at = (tiefe, seite) => tf(gx - tiefe, gy + seite);
+  ctx.save();
+  const [k0, k1] = [tf(L / 2, 0), tf(L, B)];
+  ctx.beginPath(); ctx.rect(Math.min(k0[0], k1[0]), Math.min(k0[1], k1[1]), Math.abs(k1[0] - k0[0]), Math.abs(k1[1] - k0[1])); ctx.clip(); // nur innerhalb der Bande
+  ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.strokeStyle = S.fein;
+  const tS = Math.sqrt(Math.max(0, ZONEN.SLOT_M ** 2 - hb ** 2));
+  ctx.beginPath(); ctx.moveTo(...at(0, -hb)); ctx.lineTo(...at(tS, -hb));
+  const [cx, cy] = at(0, 0);
+  const a0 = Math.atan2(at(tS, -hb)[1] - cy, at(tS, -hb)[0] - cx), a1 = Math.atan2(at(tS, hb)[1] - cy, at(tS, hb)[0] - cx);
+  ctx.arc(cx, cy, ZONEN.SLOT_M * sc, a0, a1, a1 < a0); // kurzer Bogen über die Mittelachse
+  ctx.lineTo(...at(0, hb)); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, ZONEN.DISTANZ_M * sc, 0, Math.PI); ctx.stroke(); // 12-m-Bogen (Richtung Mittellinie)
+  const rad = ZONEN.SPITZ_GRAD * Math.PI / 180;
+  for (const sgn of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(...at(ZONEN.DISTANZ_M * Math.cos(rad), sgn * ZONEN.DISTANZ_M * Math.sin(rad))); ctx.stroke(); }
+  ctx.restore();
+  if (opts.titel) {
+    ctx.fillStyle = S.text; ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(opts.titel, pad, 4);
+  }
+  const hits = [];
+  for (const s of punkte) {
+    if (!s.geo || s.geo.xm == null) continue;
+    const ym = Math.min(s.geo.ym, L / 2 - 0.3); // Schüsse aus der eigenen Hälfte an der Mittellinie
+    const [x, y] = [ox + s.geo.xm * sc, top + ym * sc];
+    hits.push({ s, x, y });
+  }
+  // Tore zuletzt (oben auf)
+  const rang = s => s.erg === 'tor' ? 1 : 0;
+  for (const p of [...hits].sort((a, b) => rang(a.s) - rang(b.s))) drawShotMarker(ctx, p.x, p.y, p.s.erg, Math.max(3.5, sc * 0.33), S, opts.sel && opts.sel.has(p.s));
+  if (opts.rahmen) {
+    const [x0, y0, x1, y1] = opts.rahmen;
+    ctx.save(); ctx.setLineDash([5, 3]); ctx.strokeStyle = S.wahl; ctx.lineWidth = 1;
+    ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); ctx.restore();
+  }
+  canvas._hits = hits;
+  return hits;
 }
 
 // ---------- Erfassen und Nachtragen ----------
@@ -4753,7 +4812,32 @@ function computeStats(range = null) {
 
   const st = { segs, players: P, lines: L, passes, contacts, chainsOpen, assign, played, lineMembers, range };
   st.kz = computeKennzahlen(st, range, fl);
+  st.ort = feat('schussort') ? computeSchussorte(st, range) : [];
   return st;
+}
+
+// Schussort (Schalter schussort): je Reihe Slot-Anteil und Ø Distanz (eigene/zugelassene), je Spieler (Schütze)
+// Schüsse aus dem Slot und Ø Distanz. Nur Schüsse mit Ort und Angriffsrichtung (= n); Reihe wie im
+// Reihenvergleich. Nur bestehende Zeilen bekommen Werte (keine neuen Reihen-/Spielerzeilen).
+function computeSchussorte(st, range) {
+  const list = shotList().filter(s => inR(range, s.time) && s.geo && s.geo.zone);
+  for (const s of list) {
+    const suf = s.team === 'ulm' ? 'F' : 'A', slot = s.geo.zone === 'slot' ? 1 : 0;
+    const l = st.lines[s.line];
+    if (l) {
+      l['ortN' + suf] = (l['ortN' + suf] || 0) + 1;
+      l['ortSlot' + suf] = (l['ortSlot' + suf] || 0) + slot;
+      l['ortDistSum' + suf] = (l['ortDistSum' + suf] || 0) + s.geo.dist;
+    }
+    const p = s.team === 'ulm' && s.schuetze && st.players[s.schuetze];
+    if (p) {
+      p.ortN = (p.ortN || 0) + 1;
+      p.ortSlot = (p.ortSlot || 0) + slot;
+      p.ortDistSum = (p.ortDistSum || 0) + s.geo.dist;
+      p.ortDist = p.ortDistSum / p.ortN;
+    }
+  }
+  return list;
 }
 
 const emptyLineStats = key => ({ key, eiszeit: 0, spielzeit: 0, schuesse: 0, gegnerschuesse: 0, tore: 0, gegentore: 0,
@@ -5339,6 +5423,10 @@ const PLAYER_COLS = [
     title: 'Gegnerschüsse aufs Tor (gehalten + Gegentore), während er auf dem Feld steht (5 gegen 5)' },
   { head: 'FA (Feld)', key: 'faOn', exp: 'gegnerschussErgebnis',
     title: 'Fenwick gegen: Gegnerschüsse ohne geblockte (inkl. Gegentore und unbekannte), während er auf dem Feld steht (5 gegen 5)' },
+  { head: 'Schüsse aus dem Slot', key: 'ortSlot', exp: 'schussort', fn: r => r.ortN ? r.ortSlot || 0 : null, n: r => r.ortN || 0,
+    title: 'Eigene Schüsse aus dem Slot (n = eigene Schüsse mit Ort und Angriffsrichtung)' },
+  { head: 'Ø Schuss-distanz (m)', key: 'ortDist', dec1: true, exp: 'schussort', fn: r => r.ortN ? r.ortDistSum / r.ortN : null, n: r => r.ortN || 0,
+    title: 'Mittlere Distanz der eigenen Schüsse zur Mitte der Torlinie (n = Schüsse mit Ort)' },
 ];
 
 // Spalten, deren Schalter aktiv ist; Kopf und Hinweis dürfen vom Modus abhängen (Funktion)
@@ -5375,7 +5463,8 @@ function lineRows(st, keys) {
   }
   const total = { ...emptyLineStats('gesamt'), label: 'Gesamt' };
   for (const r of rows) for (const k of ['eiszeit', 'spielzeit', 'schuesse', 'gegnerschuesse', 'tore', 'gegentore', 'cf', 'ca', 'bbZeit', 'bbGesch',
-    'konter', 'pressN', 'pressOk', 'ballgewinne', 'loseBaelle', 'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa']) total[k] = (total[k] || 0) + (r[k] || 0);
+    'konter', 'pressN', 'pressOk', 'ballgewinne', 'loseBaelle', 'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa',
+    'ortNF', 'ortSlotF', 'ortDistSumF', 'ortNA', 'ortSlotA', 'ortDistSumA']) total[k] = (total[k] || 0) + (r[k] || 0);
   total.laengstePhase = Math.max(0, ...rows.map(r => r.laengstePhase || 0));
   total.bbN = st.kz ? st.kz.team.bbN || 0 : 0; // Ketten des Teams (eine Kette kann über einen Wechsel gehen)
   return { rows, total };
@@ -5408,6 +5497,12 @@ const LINE_COLS = [
   { head: 'Rück-eroberungen', key: 'rueck', exp: 'loseBaelle', fn: r => (r.ballgewinne || 0) + (r.loseBaelle || 0), title: 'Ballgewinne + lose Bälle' },
   { head: 'Rück-eroberungen / 10 min', key: 'rueck10', dec1: true, exp: 'loseBaelle',
     fn: r => per10((r.ballgewinne || 0) + (r.loseBaelle || 0), feat('spielzeitGeschaetzt') ? r.spielzeit : r.eiszeit) },
+  { head: 'Slot-Anteil eigene', key: 'ortSlotQF', pct: true, exp: 'schussort', fn: r => r.ortNF ? (r.ortSlotF || 0) / r.ortNF : null, n: r => r.ortNF || 0,
+    title: 'Anteil der eigenen Schüsse aus dem Slot (n = eigene Schüsse mit Ort und Angriffsrichtung)' },
+  { head: 'Slot-Anteil Gegner', key: 'ortSlotQA', pct: true, exp: 'schussort', fn: r => r.ortNA ? (r.ortSlotA || 0) / r.ortNA : null, n: r => r.ortNA || 0,
+    title: 'Anteil der zugelassenen Gegnerschüsse aus dem Slot (n = Gegnerschüsse mit Ort und Angriffsrichtung)' },
+  { head: 'Ø Distanz eigene (m)', key: 'ortDistF', dec1: true, exp: 'schussort', fn: r => r.ortNF ? r.ortDistSumF / r.ortNF : null, n: r => r.ortNF || 0 },
+  { head: 'Ø Distanz Gegner (m)', key: 'ortDistA', dec1: true, exp: 'schussort', fn: r => r.ortNA ? r.ortDistSumA / r.ortNA : null, n: r => r.ortNA || 0 },
 ];
 
 // Ballsicherheit (Schalter ballbilanz): Ballbilanz = (Ballgewinne + lose Bälle) − (Fehlpässe + Ballverluste)
@@ -5596,7 +5691,8 @@ function berichtChecks(out) {
 // Auswertung: Darstellung
 // ======================================================================
 
-const statsUI = { period: 'gesamt', sub: 'basis', sit: 'gleich', matrixLine: 'alle', netLine: '1', netMode: 'getrennt' };
+const statsUI = { period: 'gesamt', sub: 'basis', sit: 'gleich', matrixLine: 'alle', netLine: '1', netMode: 'getrennt',
+  karte: { line: 'alle', spieler: '', sit: 'alle', erg: 'alle' } };
 
 function renderStats() {
   const root = $('statsView');
@@ -5614,9 +5710,12 @@ function renderStats() {
       h('button', { class: statsUI.period === v ? 'active' : null,
         onclick: () => { statsUI.period = v; renderStats(); } }, l)));
 
-  if (!feat('erweiterteKennzahlen')) { statsUI.sub = 'basis'; statsUI.netSize = 'kontakte'; }
-  const subSeg = !feat('erweiterteKennzahlen') ? null : h('div', { class: 'seg' },
-    [['basis', 'Übersicht'], ['erweitert', 'Erweiterte Kennzahlen' + expMark('erweiterteKennzahlen')]].map(([v, l]) =>
+  if (!feat('erweiterteKennzahlen')) statsUI.netSize = 'kontakte';
+  const subs = [['basis', 'Übersicht'], ...(feat('erweiterteKennzahlen') ? [['erweitert', 'Erweiterte Kennzahlen' + expMark('erweiterteKennzahlen')]] : []),
+    ...(feat('schussort') ? [['schusskarte', 'Schusskarte' + expMark('schussort')]] : [])];
+  if (!subs.some(([v]) => v === statsUI.sub)) statsUI.sub = 'basis';
+  const subSeg = subs.length < 2 ? null : h('div', { class: 'seg' },
+    subs.map(([v, l]) =>
       h('button', { class: statsUI.sub === v ? 'active' : null, onclick: () => { statsUI.sub = v; renderStats(); } }, l)));
 
   // Schnellauswahl für Highlight-Clips (gewählter Zeitraum)
@@ -5658,6 +5757,10 @@ function renderStats() {
       quick));
   if (statsUI.sub === 'erweitert') {
     root.append(...renderKennzahlen(st, pLabel2));
+    return;
+  }
+  if (statsUI.sub === 'schusskarte') {
+    root.append(...renderSchusskarte(range, pLabel2));
     return;
   }
   root.append(
@@ -5933,6 +6036,8 @@ function playerEvidence(st, id, key) {
       return chainsWhere(r, c => chainSlices(c).some(sl => onFieldIds(lineupAt(sl.kontakt)).includes(id))).map(chain => ({ chain }));
     case 'konterVerursacht':
       return ((st.kz.umschalten.konterP[id] || {}).ereignisse || []).map(konter => ({ konter }));
+    case 'ortSlot': case 'ortDist':
+      return (st.ort || []).filter(s => s.team === 'ulm' && s.schuetze === id && (key === 'ortDist' || s.geo.zone === 'slot')).map(s => ({ x: s.x }));
   }
   return [];
 }
@@ -5974,6 +6079,10 @@ function lineEvidence(st, key, col) {
     case 'schicht':
       return computeShifts().filter(s => isKey(s.key) && (!r || (s.start >= r.t0 && s.start <= r.t1)))
         .map(s => ({ span: [s.start, s.ende], label: `Schicht ${lineLabel(s.key)} (${fmtTime(s.dauer)})` }));
+    case 'ortSlotQF': case 'ortSlotQA': case 'ortDistF': case 'ortDistA': {
+      const team = col.endsWith('F') ? 'ulm' : 'gegner';
+      return (st.ort || []).filter(s => s.team === team && isKey(s.line) && (!col.startsWith('ortSlot') || s.geo.zone === 'slot')).map(s => ({ x: s.x }));
+    }
   }
   return [];
 }
@@ -6536,6 +6645,138 @@ function renderGoalieTable(st) {
   ], rows, { clip: (r, c) => playerEvidence(st, r.id, c.key) });
 }
 
+// ---------- Schusskarte (Schalter schussort) ----------
+const KARTE_ERG = [['alle', 'alle Ergebnisse'], ['tor', 'Tor'], ['aufsTor', 'aufs Tor (Tor + gehalten)'], ['gehalten', 'gehalten'],
+  ['geblockt', 'geblockt'], ['vorbei', 'vorbei'], ['unbekannt', 'unbekannt']];
+const ergLabel = erg => (ORT_ZEICHEN.find(z => z[0] === erg) || [, , erg])[2];
+
+// Filter der Schusskarte: Reihe (wie im Reihenvergleich), Situation (aus der Reihe), Ergebnis, Spieler
+// (eigene Schüsse: Schütze; Gegnerschüsse: auf dem Feld, Torwart eingeschlossen)
+function karteFilter(list, f) {
+  return list.filter(s => {
+    if (f.line !== 'alle' && s.line !== f.line) return false;
+    if (f.sit !== 'alle' && sitOf(s.line) !== f.sit) return false;
+    if (f.erg === 'aufsTor' ? !(s.erg === 'tor' || s.erg === 'gehalten') : f.erg !== 'alle' && s.erg !== f.erg) return false;
+    if (f.spieler) {
+      if (s.team === 'ulm') return s.schuetze === f.spieler;
+      const lu = lineupAt(s.time);
+      return lu.slots.some(x => x.id === f.spieler) || (!lu.ohneTorwart && lu.torwart === f.spieler);
+    }
+    return true;
+  });
+}
+
+// Zonentabelle: Schüsse mit Ort und Richtung je Zone, eigene und Gegner; Summe = alle Schüsse mit Ort
+function zoneTable(list) {
+  const aufs = s => s.erg === 'tor' || s.erg === 'gehalten';
+  const fill = (r, pick) => {
+    for (const [suf, team] of [['F', 'ulm'], ['A', 'gegner']]) {
+      const l = list.filter(s => s.team === team && s.geo && s.geo.zone && pick(s));
+      Object.assign(r, { ['n' + suf]: l.length, ['aufs' + suf]: l.filter(aufs).length, ['tore' + suf]: l.filter(s => s.erg === 'tor').length, ['list' + suf]: l });
+    }
+    return r;
+  };
+  const rows = ZONE_DEFS.map(z => fill({ label: z.label, zone: z.code }, s => s.geo.zone === z.code));
+  const total = fill({ label: 'Summe (mit Ort)' }, () => true);
+  for (const r of [...rows, total]) { r.anteilF = total.nF ? r.nF / total.nF : null; r.anteilA = total.nA ? r.nA / total.nA : null; }
+  return { rows, total };
+}
+const ZONE_COLS = [
+  { head: 'Zone', key: 'label', text: true },
+  { head: 'Eigene Schüsse', key: 'nF' }, { head: 'Anteil', key: 'anteilF', pct: true }, { head: 'aufs Tor', key: 'aufsF', title: 'Tor + gehalten' }, { head: 'Tore', key: 'toreF' },
+  { head: 'Gegner-schüsse', key: 'nA' }, { head: 'Anteil', key: 'anteilA', pct: true }, { head: 'aufs Tor', key: 'aufsA', title: 'Tor + gehalten' }, { head: 'Tore', key: 'toreA' },
+];
+function zoneClip(r, c) {
+  const suf = c.key.endsWith('F') ? 'F' : 'A';
+  let l = r['list' + suf] || [];
+  if (c.key.startsWith('aufs')) l = l.filter(s => s.erg === 'tor' || s.erg === 'gehalten');
+  if (c.key.startsWith('tore')) l = l.filter(s => s.erg === 'tor');
+  return l.map(s => ({ x: s.x }));
+}
+
+// Halbfeld mit Klick (Szene) und Rahmen (Playlist der markierten Punkte)
+function wireKarte(canvas, list, title, w) {
+  const draw = (rahmen, sel) => drawHalfRink(canvas, list, { breite: w, rahmen, sel });
+  draw();
+  const pos = e => { const b = canvas.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+  const nearest = p => (canvas._hits || []).map(x => ({ x, d: Math.hypot(x.x - p[0], x.y - p[1]) })).filter(o => o.d <= 9).sort((a, b) => a.d - b.d)[0];
+  const tip = s => `${fmtTime(s.time, true)} · ${ergLabel(s.erg)} · ${ortText(s.geo)}` +
+    (s.team === 'ulm' && s.schuetze ? ` · ${pl(s.schuetze)}` : '') + (s.line !== '_' ? ` · ${lineShort(s.line)}` : '');
+  let start = null;
+  canvas.addEventListener('pointermove', e => {
+    const p = pos(e);
+    if (start) { if (Math.hypot(p[0] - start[0], p[1] - start[1]) > 4) draw([...start, ...p]); return; }
+    const n = nearest(p);
+    canvas.title = n ? tip(n.x.s) + (feat('playlist') ? ' – Klick: Szene' : '') : (feat('playlist') ? 'Rahmen aufziehen: markierte Schüsse als Playlist' : '');
+  });
+  if (!feat('playlist')) return;
+  canvas.addEventListener('pointerdown', e => { start = pos(e); canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointercancel', () => { start = null; draw(); });
+  canvas.addEventListener('pointerup', e => {
+    if (!start) return;
+    const p = pos(e), s0 = start;
+    start = null;
+    if (Math.hypot(p[0] - s0[0], p[1] - s0[1]) <= 4) {
+      draw();
+      const n = nearest(p);
+      if (n) openPlaylist(`${title} – ${tip(n.x.s)}`, [{ x: n.x.s.x }]);
+      return;
+    }
+    const [x0, x1, y0, y1] = [Math.min(s0[0], p[0]), Math.max(s0[0], p[0]), Math.min(s0[1], p[1]), Math.max(s0[1], p[1])];
+    const inside = (canvas._hits || []).filter(x => x.x >= x0 && x.x <= x1 && x.y >= y0 && x.y <= y1);
+    draw(null, new Set(inside.map(x => x.s)));
+    if (inside.length) openPlaylist(`${title} – Auswahl (${inside.length})`, inside.map(x => ({ x: x.s.x })));
+    else notice('Im Rahmen liegt kein Schuss.');
+  });
+}
+
+const karteLegende = () => h('div', { class: 'karteLegende' }, 'Symbole: ',
+  ORT_ZEICHEN.map(([erg, sym, label]) => h('span', null, h('b', { style: `color:${ORT_FARBEN[erg]}` }, sym), ' ', label)),
+  h('span', { class: 'hint' }, `· gestrichelt: Slot (≤ ${ZONEN.SLOT_M} m, Torraumbreite), ${ZONEN.DISTANZ_M}-m-Grenze, spitzer Winkel ab ${ZONEN.SPITZ_GRAD}°`));
+
+function renderSchusskarte(range, pLabel2) {
+  const f = statsUI.karte;
+  const all = shotList().filter(s => inR(range, s.time));
+  const usedLines = LINES.filter(l => all.some(s => s.line === l.key)).map(l => [l.key, l.label]);
+  if (all.some(s => s.line === '_')) usedLines.push(['_', 'ohne Reihe']);
+  if (f.line !== 'alle' && !usedLines.some(([k]) => k === f.line)) f.line = 'alle';
+  const sel = karteFilter(all, f);
+  const mitGeo = sel.filter(s => s.geo && s.geo.zone);
+  const ohneOrt = sel.filter(s => !s.ort).length, ohneR = sel.filter(s => s.geo && s.geo.ohneRichtung).length;
+  const set = (k, v) => { f[k] = v; renderStats(); };
+  const bar = h('div', { class: 'statsBar' },
+    'Reihe: ', selectEl([['alle', 'alle'], ...usedLines], f.line, v => set('line', v)),
+    'Spieler: ', selectEl([['', 'alle'], ...allPlayerOptions()], f.spieler, v => set('spieler', v)),
+    'Situation: ', selectEl([['alle', 'alle'], ['gleich', sitLabel('gleich')], ['uez', 'Überzahl'], ['uz', 'Unterzahl'], ['spez', 'Spezial']], f.sit, v => set('sit', v)),
+    'Ergebnis: ', selectEl(KARTE_ERG, f.erg, v => set('erg', v)));
+  const w = Math.max(220, Math.min(340, Math.floor((($('statsView').clientWidth || 800) - 90) / 2)));
+  const own = mitGeo.filter(s => s.team === 'ulm'), opp = mitGeo.filter(s => s.team === 'gegner');
+  const nTeam = team => sel.filter(s => s.team === team).length;
+  const map = (title, list, n) => {
+    const c = h('canvas', { class: 'karteCanvas' });
+    const box = h('div', { class: 'karteBox' }, h('div', { class: 'karteHead' }, `${title} (${list.length} von ${n} mit Ort)`), c);
+    wireKarte(c, list, title, w);
+    return box;
+  };
+  const { rows, total } = zoneTable(mitGeo);
+  const hinweis = [ohneOrt ? `${ohneOrt} Schuss/Schüsse ohne Ort` : '', ohneR ? `${ohneR} mit Ort, aber ohne Angriffsrichtung (Setup)` : '']
+    .filter(Boolean).join(' · ');
+  return [
+    panel(`Schusskarte${expMark('schussort')} – ${pLabel2}`, h('div', null, bar,
+      h('p', { class: 'hint', style: 'margin:6px 0' }, 'Halbfeld mit dem angegriffenen Tor oben, aus Sicht des Schützen; beide im gleichen Maßstab. ' +
+        (feat('playlist') ? 'Klick auf einen Punkt spielt die Szene, ein aufgezogener Rahmen alle markierten Schüsse. ' : '') +
+        (hinweis ? 'Nicht dargestellt: ' + hinweis + '.' : '')),
+      h('div', { class: 'karteRow' }, map('Unsere Schüsse – aufs gegnerische Tor', own, nTeam('ulm')),
+        map('Gegnerschüsse – aufs eigene Tor', opp, nTeam('gegner'))),
+      karteLegende())),
+    panel(`Schüsse je Zone${expMark('schussort')} – ${pLabel2}`, h('div', null,
+      h('p', { class: 'hint', style: 'margin:0 0 6px' }, `Nur Schüsse mit Ort und Angriffsrichtung (gefiltert wie die Karte). Slot: ≤ ${ZONEN.SLOT_M} m und innerhalb der ` +
+        `Torraumbreite · Halbdistanz: übrige bis ${ZONEN.DISTANZ_M} m · spitzer Winkel: ab ${ZONEN.SPITZ_GRAD}° zur Mittelachse (auch hinter dem Tor) · ` +
+        `Distanz: über ${ZONEN.DISTANZ_M} m · eigene Hälfte: Schuss von jenseits der Mittellinie.`),
+      h('div', { class: 'tableWrap' }, statsTable(ZONE_COLS, rows, { total, clip: zoneClip })))),
+  ];
+}
+
 // Penaltys (Strafschüsse): Übersicht; Penalty-Tore zählen nicht für Plus/Minus, Corsi und die Reihe
 const penaltiesIn = range => events.filter(e => e.typ === 'penalty' && inR(range, e.time));
 function penaltySummary(list) {
@@ -6821,6 +7062,8 @@ const XL_STAT_ROWS = [
   [null, 'Ballbilanz', 'KZ', 'pm', 'ballbilanz', 'ballbilanz'],
   [null, 'Ballbilanz /10′', 'KZ', 'rate10', 'ballbilanz', 'ballbilanz'],
   [null, 'Verluste je 10 Kontakte', 'KZ', 'dec1', 'verluste10', 'ballbilanz'],
+  [null, 'Schüsse aus dem Slot', 'KZ', 'num', 'ortSlot', 'schussort'],
+  [null, 'Ø Schussdistanz (m)', 'KZ', 'dec1', 'ortDist', 'schussort'],
 ];
 
 // Zeilen des Statistik-Blatts im aktuellen Modus (Kennzahlen-Block mit β)
@@ -7028,6 +7271,14 @@ function buildStatSheet(wb, title, st, groups, shifts) {
     ext.push({ head: 'FF', f, val: x => x.ff || 0, fmt: '0', agg: 'sum' }, { head: 'FA', f, val: x => x.fa || 0, fmt: '0', agg: 'sum' });
     addQuote('FF %', f, x => pctOf(x.ff || 0, x.fa || 0), x => (x.ff || 0) + (x.fa || 0), 'n (FF+FA)');
   }
+  if (kzx && feat('schussort')) {
+    // Schussort: Slot-Anteil und Ø Distanz eigene/zugelassene Schüsse (nur Schüsse mit Ort und Richtung)
+    const f = 'schussort';
+    addQuote('Slot-Anteil eigene', f, x => x.ortNF ? (x.ortSlotF || 0) / x.ortNF : null, x => x.ortNF || 0, 'n (eigene mit Ort)');
+    addQuote('Slot-Anteil Gegner', f, x => x.ortNA ? (x.ortSlotA || 0) / x.ortNA : null, x => x.ortNA || 0, 'n (Gegner mit Ort)');
+    ext.push({ head: 'Ø Distanz eigene (m)', f, val: x => orDash(x.ortNF ? x.ortDistSumF / x.ortNF : null), fmt: '0.0' },
+      { head: 'Ø Distanz Gegner (m)', f, val: x => orDash(x.ortNA ? x.ortDistSumA / x.ortNA : null), fmt: '0.0' });
+  }
   const heads = ['Reihe', sz ? 'Eiszeit (Video)' : 'Eiszeit', 'Schüsse', 'Gegner-schüsse', 'Tore', 'Gegen-tore',
     'Schüsse /10′', 'Gegner-schüsse /10′', 'Tore /10′', 'Gegen-tore /10′', ...ext.map(e => e.head + expMark(e.f))];
   const rvCols = [1, 3, 5, 6, 7, 8, 9, 10, 11, 12, ...ext.map((_, j) => 13 + j)];
@@ -7039,7 +7290,8 @@ function buildStatSheet(wb, title, st, groups, shifts) {
   const zeitCol = sz ? 'M' : 'C';
   const xlPer10 = (cntCol, r, n, sec) => xlF(`IFERROR(${colL(cntCol)}${r}/(${zeitCol}${r}*144),"–")`, sec > 0 ? n / (sec / 600) : '–');
   const sumOf = ['eiszeit', 'spielzeit', 'schuesse', 'gegnerschuesse', 'tore', 'gegentore', 'cf', 'ca', 'bbGesch', 'konter', 'pressN', 'pressOk',
-    'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa', 'ballgewinne', 'loseBaelle'];
+    'gsTor', 'gsGehalten', 'gsGeblockt', 'gsVorbei', 'gsUnbekannt', 'ff', 'fa', 'ballgewinne', 'loseBaelle',
+    'ortNF', 'ortSlotF', 'ortDistSumF', 'ortNA', 'ortSlotA', 'ortDistSumA'];
   const totals = { ...Object.fromEntries(sumOf.map(f => [f, 0])), laengstePhase: 0, schichtCa10: null,
     bbN: st.kz ? st.kz.team.bbN || 0 : 0 }; // Ketten des Teams (nicht Summe der Reihen)
   const fields = ['schuesse', 'gegnerschuesse', 'tore', 'gegentore'];
@@ -7407,6 +7659,85 @@ function buildEventSheet(wb) {
   return ws;
 }
 
+// ---------- Excel: Schusskarten und Schüsse (Schalter schussort) ----------
+// Halbfeld als PNG (dieselbe Zeichenfunktion wie am Bildschirm, Druckfarben, 3-fache Auflösung)
+function karteImage(wb, list, titel) {
+  const c = document.createElement('canvas');
+  drawHalfRink(c, list, { breite: 280, stil: 'druck', scale: 3, titel });
+  return { id: wb.addImage({ base64: c.toDataURL('image/png'), extension: 'png' }), w: 280, h: parseFloat(c.style.height) };
+}
+
+// Blöcke: Gesamt, jede normale Reihe mit Eiszeit, ÜZ und UZ zusammengefasst (alle ÜZ- bzw. UZ-Reihen)
+function schusskartenBlocks(gesamt) {
+  const ez = keys => keys.reduce((s, k) => s + ((gesamt.lines[k] || {}).eiszeit || 0), 0);
+  const out = [{ label: 'Gesamt', keys: null, eiszeit: Object.values(gesamt.lines).reduce((s, l) => s + (l.eiszeit || 0), 0) }];
+  for (const l of LINES.filter(l => !l.special && ez([l.key]) > 0)) out.push({ label: l.label, keys: [l.key], eiszeit: ez([l.key]) });
+  for (const [sit, label] of [['uez', 'Überzahl (zusammengefasst)'], ['uz', 'Unterzahl (zusammengefasst)']]) {
+    const keys = LINES.filter(l => sitOf(l.key) === sit).map(l => l.key);
+    if (ez(keys) > 0) out.push({ label, keys, eiszeit: ez(keys) });
+  }
+  return out;
+}
+
+function buildSchusskartenSheet(wb, gesamt) {
+  const ws = wb.addWorksheet('Schusskarten', { views: [{ zoomScale: 90, showGridLines: false }],
+    pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+      margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } } });
+  ws.getColumn(1).width = 18;
+  for (let c = 2; c <= 10; c++) ws.getColumn(c).width = 12;
+  const put = (r, c, value, style = {}) => Object.assign(ws.getCell(r, c), { value }, style);
+  const muted = { font: xlFont({ italic: true, color: xlArgb(XL.MUTED) }) };
+  put(1, 1, 'Schusskarten' + expMark('schussort'), { font: xlFont({ bold: true }) });
+  put(2, 1, 'Symbole: ★ Tor · ○ gehalten · △ geblockt · ✕ vorbei · ◇ unbekannt (zusätzlich farbig). Halbfeld mit dem angegriffenen Tor oben, ' +
+    'aus Sicht des Schützen; links unsere Schüsse, rechts Gegnerschüsse, gleicher Maßstab.', muted);
+  put(3, 1, `Nur Schüsse mit Ort und Angriffsrichtung; Reihe = Reihe auf dem Feld beim Schuss (wie im Reihenvergleich). Zonen: Slot ≤ ${ZONEN.SLOT_M} m ` +
+    `innerhalb der Torraumbreite · Halbdistanz bis ${ZONEN.DISTANZ_M} m · spitzer Winkel ab ${ZONEN.SPITZ_GRAD}° · Distanz über ${ZONEN.DISTANZ_M} m · eigene Hälfte.`, muted);
+  const list = shotList().filter(s => s.geo && s.geo.zone);
+  let r = 5;
+  for (const b of schusskartenBlocks(gesamt)) {
+    const sel = b.keys ? list.filter(s => b.keys.includes(s.line)) : list;
+    put(r, 1, `${b.label} – Eiszeit ${fmtTime(b.eiszeit)}`, { font: xlFont({ bold: true, size: 13 }) });
+    for (let c = 1; c <= 10; c++) ws.getCell(r, c).fill = xlFill(XL.YELLOW);
+    const own = sel.filter(s => s.team === 'ulm'), opp = sel.filter(s => s.team === 'gegner');
+    const i1 = karteImage(wb, own, `Unsere Schüsse (${own.length})`), i2 = karteImage(wb, opp, `Gegnerschüsse (${opp.length})`);
+    ws.addImage(i1.id, { tl: { col: 0, row: r }, ext: { width: i1.w, height: i1.h } });
+    ws.addImage(i2.id, { tl: { col: 4, row: r }, ext: { width: i2.w, height: i2.h } });
+    const imgRows = Math.ceil(Math.max(i1.h, i2.h) / 20) + 1;
+    const { rows, total } = zoneTable(sel);
+    const next = xlWriteTable(ws, r + imgRows + 1, { title: `${b.label}: Schüsse je Zone`, cols: ZONE_COLS, rows, total });
+    ws.getRow(next - 1).addPageBreak();
+    r = next + 1;
+  }
+  return ws;
+}
+
+// Eine Zeile pro Schussversuch (eigene und Gegner) zum Weiterauswerten
+function buildShotsSheet(wb) {
+  const ws = wb.addWorksheet('Schüsse', { views: [{ state: 'frozen', ySplit: 2 }] });
+  const ps = periods();
+  const periodOf = t => { const p = ps.find(p => t >= p.t0 && t <= p.t1); return p ? periodLabel(p.nummer) : ''; };
+  ws.getCell(1, 1).value = 'Schüsse' + expMark('schussort');
+  ws.getCell(1, 1).font = xlFont({ bold: true });
+  ws.getCell(1, 4).value = 'x = quer zur Mittelachse (+ = rechts aus Sicht des Schützen), y = Abstand vor der Torlinie (negativ = hinter dem Tor), ' +
+    'Meter, gedreht auf das angegriffene Tor. Ort Kamera = gespeicherter Klick (0–100).';
+  ws.getCell(1, 4).font = xlFont({ italic: true, color: xlArgb(XL.MUTED) });
+  const heads = ['Zeit', 'Sekunden', 'Drittel', 'Team', 'Reihe auf dem Feld', 'Schütze', 'Ergebnis', 'Blocker',
+    'x (m)', 'y (m)', 'Distanz (m)', 'Winkel (°)', 'Zone', 'Ort Kamera x', 'Ort Kamera y'];
+  ws.getRow(2).values = heads;
+  ws.getRow(2).eachCell(c => { c.font = xlFont({ bold: true }); c.fill = xlFill(XL.GREY); });
+  const r1 = v => v == null ? '' : Math.round(v * 10) / 10;
+  for (const s of shotList()) {
+    const g = s.geo && s.geo.zone ? s.geo : null;
+    ws.addRow([fmtTime(s.time, true), Math.round(s.time * 10) / 10, periodOf(s.time), s.team === 'ulm' ? 'VfB' : 'Gegner',
+      s.line === '_' ? '' : lineLabel(s.line), s.team === 'ulm' && s.schuetze ? pl(s.schuetze) : '', ergLabel(s.erg),
+      s.ev.blocker ? pl(s.ev.blocker) : '', g ? r1(g.seite) : '', g ? r1(g.tiefe) : '', g ? r1(g.dist) : '', g ? Math.round(g.winkel) : '',
+      g ? zoneLabel(g.zone) : s.geo && s.geo.ohneRichtung ? 'Richtung fehlt' : '', s.ort ? s.ort.x : '', s.ort ? s.ort.y : '']);
+  }
+  [11, 9, 13, 8, 16, 22, 11, 22, 8, 8, 11, 10, 15, 12, 12].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: Math.max(2, ws.rowCount), column: heads.length } };
+  return ws;
+}
+
 async function exportExcel() {
   if (!window.ExcelJS) {
     notice('exceljs.min.js fehlt neben der HTML-Datei – Excel-Export nicht möglich. JSON-Export funktioniert.', 'warn', true);
@@ -7441,6 +7772,7 @@ async function buildWorkbook() {
   }
   buildPassSheet(wb, gesamt, groups);
   if (feat('kennzahlenExport')) for (const [name, render, hint] of KZ_SHEETS) buildKzSheet(wb, name, render, hint, blocks);
+  if (feat('schussort')) { buildSchusskartenSheet(wb, gesamt); buildShotsSheet(wb); }
   buildEventSheet(wb);
   if (modus() === 'experiment') markExperimentWorkbook(wb);
   return wb;
