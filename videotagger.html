@@ -863,6 +863,7 @@ const KZ = {
   // Schussarten (Schalter schussartAuto); Zeiten = Videozeit ohne O-Unterbrechungen
   DIREKT_S: 1.0,            // Direktschuss: Schuss ≤ 1,0 s nach dem Ballkontakt des Schützen (grobe Näherung: zwei Tastendrücke)
   ABPRALLER_S: 3,           // Abpraller/zweite Chance: ≤ 3 s nach dem vorigen Schuss desselben Teams
+  ABPRALLER_SCHUSS_S: 5,    // Schussart zweite Chance: Schuss ≤ 5 s nach Beginn der Kette (die ≤ 3 s nach eigenem Schuss beginnt)
   NACH_BULLY_S: 5,          // nach Bully: Kette mit Start Bully, Schuss ≤ 5 s nach Kettenbeginn
   // Paradenarten (Schalter paradenAuto)
   PARADE_S: 4,              // was ≤ 4 s nach einem gehaltenen Schuss passiert
@@ -1727,7 +1728,7 @@ const SCHUSSARTEN = [
   { code: 'direkt', label: 'Direktschuss', teams: ['ulm'],
     title: `Schütze hat einen Pass erhalten, Schuss ≤ ${KZ.DIREKT_S} s nach seinem Ballkontakt (grobe Näherung: zwei Tastendrücke mit Reaktionszeit)` },
   { code: 'abpraller', label: 'Abpraller / zweite Chance', teams: ['ulm', 'gegner'],
-    title: `≤ ${KZ.ABPRALLER_S} s nach einem vorigen Schuss desselben Teams (eigene: Schuss nach gehalten/geblockt oder Kette beginnt nach gehalten/geblockt/vorbei)` },
+    title: `≤ ${KZ.ABPRALLER_S} s nach einem vorigen Schuss desselben Teams (eigene: Schuss nach gehalten/geblockt oder Kette beginnt nach gehalten/geblockt/vorbei und Schuss ≤ ${KZ.ABPRALLER_SCHUSS_S} s nach Kettenbeginn)` },
   { code: 'konter', label: 'Konter', teams: ['ulm'], title: `Kette mit Start Ballgewinn (Taste A) oder loser Ball, Schuss ≤ ${KZ.EIGENER_KONTER_S} s nach Kettenbeginn; nicht, wenn die Kette ≤ ${KZ.ABPRALLER_S} s nach einem eigenen Schuss beginnt (zweite Chance)` },
   { code: 'nachVerlust', label: 'nach unserem Ballverlust', teams: ['gegner'],
     title: `Konter gegen uns: ≤ ${KZ.KONTER_S} s nach eigenem Fehlpass/Ballverlust, ohne eigene Kette dazwischen` },
@@ -1769,8 +1770,8 @@ function annotateShots(list) {
       if (s.x.nurD1) { s.arten = fern(s) ? ['fern'] : ['nichtErfasst']; continue; }
       const c = s.ev, k = c.kette, a = [];
       if (k.length >= 2 && nd(k[k.length - 1].time, s.time) <= KZ.DIREKT_S) a.push('direkt');
-      const zweite = istZweiteChance(c, oiv);
-      if (zweite || own.some(p => p.time < s.time - 1e-9 && (p.erg === 'gehalten' || p.erg === 'geblockt') && nd(p.time, s.time) <= KZ.ABPRALLER_S)) a.push('abpraller');
+      const zweite = istZweiteChance(c, oiv); // schließt Konter aus; Schussart Abpraller nur bei Schuss ≤ 5 s nach Kettenbeginn
+      if ((zweite && nd(c.tStart, s.time) <= KZ.ABPRALLER_SCHUSS_S) || own.some(p => p.time < s.time - 1e-9 && (p.erg === 'gehalten' || p.erg === 'geblockt') && nd(p.time, s.time) <= KZ.ABPRALLER_S)) a.push('abpraller');
       if (istRueckeroberung(c) && !zweite && nd(c.tStart, s.time) <= KZ.EIGENER_KONTER_S) a.push('konter');
       if (c.start === 'bully' && nd(c.tStart, s.time) <= KZ.NACH_BULLY_S) a.push('nachBully');
       if (fern(s)) a.push('fern');

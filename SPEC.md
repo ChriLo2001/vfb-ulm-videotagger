@@ -1102,7 +1102,12 @@ O-Unterbrechungen. Mehrfach möglich (z. B. Konter + Direktschuss).
     Näherung: beruht auf zwei Tastendrücken mit Reaktionszeit.
   - Abpraller / zweite Chance: Schuss ≤ 3 s nach einem vorigen eigenen
     Schuss, der gehalten oder geblockt wurde, oder die Kette beginnt ≤ 3 s
-    nach einem eigenen Schuss (gehalten, geblockt oder vorbei).
+    nach einem eigenen Schuss (gehalten, geblockt oder vorbei) und der
+    Schuss fällt ≤ 5 s nach Kettenbeginn (`KZ.ABPRALLER_SCHUSS_S`). Kommt
+    der Schuss später, ist er kein Abpraller und – weil die Kette als
+    zweite Chance vom Konter ausgenommen bleibt – „aus dem Spielaufbau“
+    (sofern keine andere Art zutrifft). Festlegung 17.11.2026: eine lange
+    Kette nach dem Abpraller ist ein neuer Angriff, keine zweite Chance.
   - Konter: wie „eigener Konter“ (Start Ballgewinn per A oder loser Ball,
     Schuss ≤ 10 s nach Kettenbeginn, keine zweite Chance).
   - Nach Bully: Kette mit Start Bully, Schuss ≤ 5 s nach Kettenbeginn.
@@ -1233,13 +1238,18 @@ O-Unterbrechungen. Mehrfach möglich (z. B. Konter + Direktschuss).
 - Neue Prüfwerte Heidelberg-Mannheim: eigene Konter 14 (vorher 19), je
   Reihe R1 5 (7), R2 5 (8), R3 4 (4); Ballgewinne + lose Bälle 119
   (unverändert). Starts Torwart 9, davon 0 Konter (unverändert).
-- Schussarten (ohne Schussorte, also ohne Fernschuss): eigene 2
-  Direktschüsse, 14 Konter (vorher 19), 11 Abpraller / zweite Chance
-  (vorher 0), 15 Spielaufbau (vorher 21); Gegner unverändert (15 nach
-  Ballverlust, 3 Abpraller, 31 Spielaufbau).
+- Schussarten (ohne Schussorte, also ohne Fernschuss), nach der
+  Nachschärfung mit `KZ.ABPRALLER_SCHUSS_S` = 5 s: eigene 2 Direktschüsse,
+  14 Konter (ursprünglich 19), 4 Abpraller / zweite Chance (ursprünglich
+  0), 22 Spielaufbau (ursprünglich 21) – zusammen alle 42 eigenen Schüsse;
+  Gegner unverändert (15 nach Ballverlust, 3 Abpraller, 31 Spielaufbau).
 - 16 Ketten beginnen ≤ 3 s nach einem eigenen Schuss; 11 davon enden mit
   einem Schuss, 5 davon lagen bisher im 10-s-Konterfenster (20:40, 20:43,
-  33:44, 1:00:19, 1:04:39 Kettenbeginn).
+  33:44, 1:00:19, 1:04:39 Kettenbeginn). Von den 11 Schüssen fallen 4
+  ≤ 5 s nach Kettenbeginn (Abpraller: 20:42, 20:46, 33:47, 1:04:39), 7
+  später (Spielaufbau, 7,4 bis 22,2 s nach Kettenbeginn).
+- Excel Nachschärfung: Standard identisch; Experiment nur 7 Zellen
+  „Schussart“ im Blatt „Schüsse“ (Abpraller → Spielaufbau).
 
 ## Bekannte Grenzen
 - Gleichzeitige Strafen (4 gegen 4) und angezeigte Strafen werden nicht
