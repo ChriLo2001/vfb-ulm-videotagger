@@ -1721,6 +1721,136 @@ function shotList() {
   return out.sort((a, b) => a.time - b.time);
 }
 
+// ---------- Schussarten und Paradenarten (Schalter schussartAuto, paradenAuto) ----------
+// Nur aus vorhandenen Daten abgeleitet, keine neue Eingabe. Zeiten = Videozeit ohne O-Unterbrechungen.
+const SCHUSSARTEN = [
+  { code: 'direkt', label: 'Direktschuss', teams: ['ulm'],
+    title: `Schütze hat einen Pass erhalten, Schuss ≤ ${KZ.DIREKT_S} s nach seinem Ballkontakt (grobe Näherung: zwei Tastendrücke mit Reaktionszeit)` },
+  { code: 'abpraller', label: 'Abpraller / zweite Chance', teams: ['ulm', 'gegner'],
+    title: `≤ ${KZ.ABPRALLER_S} s nach einem vorigen Schuss desselben Teams (eigene: nur nach gehalten oder geblockt)` },
+  { code: 'konter', label: 'Konter', teams: ['ulm'], title: `Kette mit Start Ballgewinn (Taste A) oder loser Ball, Schuss ≤ ${KZ.EIGENER_KONTER_S} s nach Kettenbeginn` },
+  { code: 'nachVerlust', label: 'nach unserem Ballverlust', teams: ['gegner'],
+    title: `Konter gegen uns: ≤ ${KZ.KONTER_S} s nach eigenem Fehlpass/Ballverlust, ohne eigene Kette dazwischen` },
+  { code: 'nachBully', label: 'nach Bully', teams: ['ulm'], title: `Kette mit Start Bully, Schuss ≤ ${KZ.NACH_BULLY_S} s nach Kettenbeginn` },
+  { code: 'fern', label: 'Fernschuss', teams: ['ulm', 'gegner'], title: `Zone Distanz (über ${ZONEN.DISTANZ_M} m; nur mit Schussort)` },
+  { code: 'aufbau', label: 'aus dem Spielaufbau', teams: ['ulm', 'gegner'], title: 'keine der anderen Schussarten' },
+  { code: 'nichtErfasst', label: 'nicht erfasst (Tor nur in Durchgang 1)', teams: ['ulm'], title: 'Tor ohne Kette in Durchgang 2: nur Fernschuss ableitbar' },
+];
+const PARADEN = [
+  { code: 'gefangen', label: 'gefangen / kontrolliert', title: 'eigene Kette mit Start Torwart – Start bestätigt oder Torwart erster Spieler' },
+  { code: 'abprallerUns', label: 'Abpraller, von uns gesichert', title: 'eigene Kette mit Start loser Ball oder Ballgewinn' },
+  { code: 'abprallerGegner', label: 'Abpraller, Gegner am Ball', title: 'weiterer Gegnerschuss ohne eigene Kette dazwischen' },
+  { code: 'aus', label: 'ins Aus / Unterbrechung', title: 'Bully, Freischlag oder Unterbrechung' },
+  { code: 'twVorauswahl', label: 'unbekannt (Torwart nur vorausgewählt)', title: 'Start Torwart nur vorausgewählt und ein Feldspieler als erster Kontakt' },
+  { code: 'unbekannt', label: 'unbekannt', title: `nichts davon ≤ ${KZ.PARADE_S} s nach der Parade` },
+  { code: 'nichtErfasst', label: 'nicht erfasst', title: 'Durchgang 2 für diese Zeit nicht erfasst' },
+  { code: 'sonst', label: 'sonst (kein gesicherter Abpraller)', title: 'nur bei unseren Schüssen: kein eigener Abpraller ≤ ' + KZ.PARADE_S + ' s' },
+];
+const artLabel = code => (SCHUSSARTEN.find(a => a.code === code) || { label: code }).label;
+const paradeLabel = code => (PARADEN.find(a => a.code === code) || { label: code || '' }).label;
+
+// Durchgang 2 gilt je Drittel von der ersten bis zur letzten Kette als erfasst
+function d2Abdeckung() {
+  const chains = chainsSorted(), ps = periods();
+  const span = cs => cs.length ? { t0: cs[0].tStart, t1: Math.max(...cs.map(c => c.tEnde ?? c.tStart)) } : null;
+  if (!ps.length) return [span(chains)].filter(Boolean);
+  return ps.map(p => span(chains.filter(c => c.tStart >= p.t0 && c.tStart <= p.t1))).filter(Boolean);
+}
+
+// Schussarten (s.arten) und Paradenarten (s.parade) an die Einträge einer vollständigen shotList hängen
+function annotateShots(list) {
+  const oiv = oIntervals(), nd = (a, b) => netDist(a, b, oiv);
+  const own = list.filter(s => s.team === 'ulm'), opp = list.filter(s => s.team === 'gegner');
+  if (feat('schussartAuto')) {
+    const u = computeUmschalten(null, oiv, ownShots(), oppAttempts());
+    const konterIds = new Set(u.team.ereignisse.konter.flatMap(k => k.schuesse.map(x => x.ev.id)));
+    const fern = s => s.geo && s.geo.zone === 'distanz';
+    for (const s of own) {
+      if (s.x.nurD1) { s.arten = fern(s) ? ['fern'] : ['nichtErfasst']; continue; }
+      const c = s.ev, k = c.kette, a = [];
+      if (k.length >= 2 && nd(k[k.length - 1].time, s.time) <= KZ.DIREKT_S) a.push('direkt');
+      if (own.some(p => p.time < s.time - 1e-9 && (p.erg === 'gehalten' || p.erg === 'geblockt') && nd(p.time, s.time) <= KZ.ABPRALLER_S)) a.push('abpraller');
+      if (istRueckeroberung(c) && nd(c.tStart, s.time) <= KZ.EIGENER_KONTER_S) a.push('konter');
+      if (c.start === 'bully' && nd(c.tStart, s.time) <= KZ.NACH_BULLY_S) a.push('nachBully');
+      if (fern(s)) a.push('fern');
+      s.arten = a.length ? a : ['aufbau'];
+    }
+    for (const s of opp) {
+      const a = [];
+      if (opp.some(p => p.time < s.time - 1e-9 && nd(p.time, s.time) <= KZ.ABPRALLER_S)) a.push('abpraller');
+      if (konterIds.has(s.ev.id)) a.push('nachVerlust');
+      if (fern(s)) a.push('fern');
+      s.arten = a.length ? a : ['aufbau'];
+    }
+  }
+  if (feat('paradenAuto')) {
+    const chains = chainsSorted(), cov = d2Abdeckung();
+    const stops = events.filter(e => e.typ === 'bully' || (e.typ === 'unterbrechung' && e.art === 'beginn'));
+    const isTW = id => (findPlayer(id) || {}).position === 'TW';
+    const within = (s, t) => t > s.time + 1e-9 && nd(s.time, t) <= KZ.PARADE_S;
+    // Gehaltene Gegnerschüsse (unser Torwart): das erste passende Ereignis ≤ 4 s danach entscheidet
+    for (const s of opp) {
+      if (s.erg !== 'gehalten') continue;
+      if (!cov.some(r => s.time >= r.t0 && s.time <= r.t1)) { s.parade = 'nichtErfasst'; continue; }
+      const c = chains.find(c => within(s, c.tStart)), o = opp.find(p => within(s, p.time)), b = stops.find(e => within(s, e.time));
+      const f = [c && { t: c.tStart, c }, o && { t: o.time, opp: true }, b && { t: b.time, stop: true }].filter(Boolean).sort((x, y) => x.t - y.t)[0];
+      s.parade = !f ? 'unbekannt' : f.opp ? 'abprallerGegner' : f.stop ? 'aus'
+        : f.c.start === 'torwart' ? (!f.c.startVorauswahl || isTW(f.c.kette[0].spieler) ? 'gefangen' : 'twVorauswahl')
+        : f.c.start === 'loserBall' || f.c.start === 'ballgewinn' ? 'abprallerUns'
+        : f.c.start === 'freischlag' || f.c.start === 'bully' ? 'aus' : 'unbekannt';
+      s.paradeNach = f ? f.t : null;
+    }
+    // Unsere gehaltenen Schüsse (Gegnertorwart): nur „Abpraller, von uns gesichert“ (zweite Chance)
+    for (const s of own) {
+      if (s.erg !== 'gehalten') continue;
+      const c = chains.find(c => within(s, c.tStart)), o = opp.find(p => within(s, p.time));
+      s.parade = c && (!o || c.tStart < o.time) && (c.start === 'loserBall' || c.start === 'ballgewinn') ? 'abprallerUns' : 'sonst';
+      s.paradeNach = s.parade === 'abprallerUns' ? c.tStart : null;
+    }
+  }
+  return list;
+}
+
+// Tabelle Schussart × (Anzahl, Anteil, aufs Tor, Tore) für uns und den Gegner (eine Art kann mehrfach zutreffen)
+function artTable(list) {
+  const aufs = s => s.erg === 'tor' || s.erg === 'gehalten';
+  const fill = (r, pick) => {
+    for (const [suf, team] of [['F', 'ulm'], ['A', 'gegner']]) {
+      const all = list.filter(s => s.team === team), l = all.filter(pick);
+      Object.assign(r, { ['n' + suf]: l.length, ['anteil' + suf]: all.length ? l.length / all.length : null,
+        ['aufs' + suf]: l.filter(aufs).length, ['tore' + suf]: l.filter(s => s.erg === 'tor').length, ['list' + suf]: l });
+    }
+    return r;
+  };
+  const rows = SCHUSSARTEN.map(a => fill({ label: a.label, art: a.code }, s => (s.arten || []).includes(a.code)))
+    .filter(r => r.art !== 'nichtErfasst' || r.nF || r.nA);
+  return { rows, total: fill({ label: 'Schüsse (jeder einmal)' }, () => true) };
+}
+const ART_COLS = [
+  { head: 'Schussart', key: 'label', text: true, title: 'Eine Schussart kann mehrfach zutreffen (z. B. Konter und Direktschuss).' },
+  { head: 'Eigene', key: 'nF' }, { head: 'Anteil', key: 'anteilF', pct: true }, { head: 'aufs Tor', key: 'aufsF', title: 'Tor + gehalten' }, { head: 'Tore', key: 'toreF' },
+  { head: 'Gegner', key: 'nA' }, { head: 'Anteil', key: 'anteilA', pct: true }, { head: 'aufs Tor', key: 'aufsA', title: 'Tor + gehalten' }, { head: 'Tore', key: 'toreA' },
+];
+
+// Paradenarten: gehaltene Gegnerschüsse (unser Torwart) und gehaltene eigene Schüsse (Gegnertorwart)
+function paradeTable(list) {
+  const rows = PARADEN.map(p => {
+    const lA = list.filter(s => s.team === 'gegner' && s.parade === p.code), lF = list.filter(s => s.team === 'ulm' && s.parade === p.code);
+    return { label: p.label, code: p.code, nA: lA.length, nF: lF.length, listA: lA, listF: lF };
+  }).filter(r => r.nA || r.nF || !['twVorauswahl', 'sonst', 'nichtErfasst'].includes(r.code));
+  const tA = list.filter(s => s.team === 'gegner' && s.parade), tF = list.filter(s => s.team === 'ulm' && s.parade);
+  for (const r of rows) { r.anteilA = tA.length ? r.nA / tA.length : null; r.anteilF = tF.length ? r.nF / tF.length : null; }
+  return { rows, total: { label: 'gehaltene Schüsse', nA: tA.length, nF: tF.length, listA: tA, listF: tF, anteilA: null, anteilF: null } };
+}
+const PARADE_COLS = [
+  { head: 'Danach (≤ ' + KZ.PARADE_S + ' s)', key: 'label', text: true },
+  { head: 'Unser Torwart: Gegnerschüsse gehalten', key: 'nA' }, { head: 'Anteil', key: 'anteilA', pct: true },
+  { head: 'Gegnertorwart: unsere Schüsse gehalten', key: 'nF' }, { head: 'Anteil', key: 'anteilF', pct: true },
+];
+// Szenen: Schussarten wie Schüsse; Paraden vom Schuss bis kurz nach dem Ereignis, das die Art bestimmt hat
+const paradeClip = (r, c) => (r['list' + (c.key.endsWith('F') ? 'F' : 'A')] || [])
+  .map(s => s.paradeNach != null ? { span: [s.time - 4, s.paradeNach + 3], label: `Parade ${fmtTime(s.time)} – ${paradeLabel(s.parade)}` } : { x: s.x });
+
 // ---------- Zeichnen (Bildschirm, Erfassung und Excel-Bilder aus denselben Funktionen) ----------
 const ORT_FARBEN = { tor: '#2ea043', gehalten: '#4c8eda', geblockt: '#e3a008', vorbei: '#d9534f', unbekannt: '#9aa0a6' };
 const ORT_ZEICHEN = [['tor', '★', 'Tor'], ['gehalten', '○', 'gehalten'], ['geblockt', '△', 'geblockt'], ['vorbei', '✕', 'vorbei'], ['unbekannt', '◇', 'unbekannt']];
@@ -6637,12 +6767,23 @@ function renderGoalieTable(st) {
   const rows = goalies().filter(p => st.players[p.id] && st.players[p.id].paraden != null)
     .map(p => ({ id: p.id, ...nameRow(p.id), ...st.players[p.id] }));
   if (!rows.length) return h('p', { class: 'placeholder' }, 'Keine Torhüter-Daten im gewählten Zeitraum.');
+  // Paradenarten (Schalter paradenAuto): was nach der Parade passiert, je Torwart (im Tor beim Schuss)
+  const pa = feat('paradenAuto') ? annotateShots(shotList()).filter(s => s.team === 'gegner' && s.parade && inR(st.range, s.time)) : [];
+  for (const r of rows) {
+    r.paListen = {};
+    for (const p of PARADEN) r.paListen[p.code] = pa.filter(s => s.parade === p.code && lineupAt(s.time).torwart === r.id);
+    for (const p of PARADEN) r['pa_' + p.code] = r.paListen[p.code].length;
+  }
+  const paCols = PARADEN.filter(p => p.code !== 'sonst' && (!['twVorauswahl', 'nichtErfasst'].includes(p.code) || rows.some(r => r['pa_' + p.code])))
+    .map(p => ({ head: p.label.replace('Abpraller, ', 'Abpr. ').replace(' / kontrolliert', '').replace(' (Torwart nur vorausgewählt)', ' (TW vorausgew.)'),
+      key: 'pa_' + p.code, exp: 'paradenAuto', title: p.title }));
   return statsTable([
     { head: 'Nr', key: 'nummer', text: true }, { head: 'Name', key: 'name', text: true },
     { head: 'Paraden', key: 'paraden', title: 'Gegnerschüsse mit Ergebnis gehalten, während er im Tor stand' },
     { head: 'Gegentore', key: 'gegentoreTW' },
     { head: 'Fangquote', key: 'fangquote', pct: true, n: r => (r.paraden || 0) + (r.gegentoreTW || 0), title: 'Paraden ÷ (Paraden + Gegentore)' },
-  ], rows, { clip: (r, c) => playerEvidence(st, r.id, c.key) });
+    ...paCols,
+  ], rows, { clip: (r, c) => c.key.startsWith('pa_') ? paradeClip({ listA: r.paListen[c.key.slice(3)] }, { key: 'nA' }) : playerEvidence(st, r.id, c.key) });
 }
 
 // ---------- Schusskarte (Schalter schussort) ----------
@@ -6736,7 +6877,7 @@ const karteLegende = () => h('div', { class: 'karteLegende' }, 'Symbole: ',
 
 function renderSchusskarte(range, pLabel2) {
   const f = statsUI.karte;
-  const all = shotList().filter(s => inR(range, s.time));
+  const all = annotateShots(shotList()).filter(s => inR(range, s.time));
   const usedLines = LINES.filter(l => all.some(s => s.line === l.key)).map(l => [l.key, l.label]);
   if (all.some(s => s.line === '_')) usedLines.push(['_', 'ohne Reihe']);
   if (f.line !== 'alle' && !usedLines.some(([k]) => k === f.line)) f.line = 'alle';
@@ -6774,6 +6915,16 @@ function renderSchusskarte(range, pLabel2) {
         `Torraumbreite · Halbdistanz: übrige bis ${ZONEN.DISTANZ_M} m · spitzer Winkel: ab ${ZONEN.SPITZ_GRAD}° zur Mittelachse (auch hinter dem Tor) · ` +
         `Distanz: über ${ZONEN.DISTANZ_M} m · eigene Hälfte: Schuss von jenseits der Mittellinie.`),
       h('div', { class: 'tableWrap' }, statsTable(ZONE_COLS, rows, { total, clip: zoneClip })))),
+    ...(feat('schussartAuto') ? [panel(`Schussarten${expMark('schussartAuto')} – ${pLabel2}`, h('div', null,
+      h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Automatisch aus den erfassten Daten (keine eigene Eingabe), gefiltert wie die Karte, auch Schüsse ohne Ort. ' +
+        'Eine Schussart kann mehrfach zutreffen, die Zeilen addieren sich daher nicht zur Summe. Direktschuss ist eine grobe Näherung ' +
+        `(zwei Tastendrücke mit Reaktionszeit, ≤ ${KZ.DIREKT_S.toLocaleString('de-DE', { minimumFractionDigits: 1 })} s). Details: ⓘ an der Spalte bzw. SPEC.`),
+      h('div', { class: 'tableWrap' }, statsTable(ART_COLS, ...(t => [t.rows, { total: t.total, clip: zoneClip }])(artTable(sel))))))] : []),
+    ...(feat('paradenAuto') ? [panel(`Paradenarten${expMark('paradenAuto')} – ${pLabel2}`, h('div', null,
+      h('p', { class: 'hint', style: 'margin:0 0 6px' }, `Gehaltene Schüsse nach dem, was ≤ ${KZ.PARADE_S} s danach passiert (das erste passende Ereignis zählt). ` +
+        'Nur wo Durchgang 2 erfasst ist (je Drittel von der ersten bis zur letzten Kette). Torwart-Ketten zählen als „gefangen“, wenn der Start ' +
+        'bestätigt ist oder der Torwart erster Spieler ist. Bei unseren Schüssen nur „Abpraller, von uns gesichert“ (zweite Chancen). Gefiltert wie die Karte.'),
+      h('div', { class: 'tableWrap' }, statsTable(PARADE_COLS, ...(t => [t.rows, { total: t.total, clip: paradeClip }])(paradeTable(sel))))))] : []),
   ];
 }
 
@@ -7721,19 +7872,22 @@ function buildShotsSheet(wb) {
   ws.getCell(1, 4).value = 'x = quer zur Mittelachse (+ = rechts aus Sicht des Schützen), y = Abstand vor der Torlinie (negativ = hinter dem Tor), ' +
     'Meter, gedreht auf das angegriffene Tor. Ort Kamera = gespeicherter Klick (0–100).';
   ws.getCell(1, 4).font = xlFont({ italic: true, color: xlArgb(XL.MUTED) });
+  const arten = feat('schussartAuto'), paraden = feat('paradenAuto');
   const heads = ['Zeit', 'Sekunden', 'Drittel', 'Team', 'Reihe auf dem Feld', 'Schütze', 'Ergebnis', 'Blocker',
-    'x (m)', 'y (m)', 'Distanz (m)', 'Winkel (°)', 'Zone', 'Ort Kamera x', 'Ort Kamera y'];
+    'x (m)', 'y (m)', 'Distanz (m)', 'Winkel (°)', 'Zone', 'Ort Kamera x', 'Ort Kamera y',
+    ...(arten ? ['Schussart' + expMark('schussartAuto')] : []), ...(paraden ? ['Nach der Parade' + expMark('paradenAuto')] : [])];
   ws.getRow(2).values = heads;
   ws.getRow(2).eachCell(c => { c.font = xlFont({ bold: true }); c.fill = xlFill(XL.GREY); });
   const r1 = v => v == null ? '' : Math.round(v * 10) / 10;
-  for (const s of shotList()) {
+  for (const s of annotateShots(shotList())) {
     const g = s.geo && s.geo.zone ? s.geo : null;
     ws.addRow([fmtTime(s.time, true), Math.round(s.time * 10) / 10, periodOf(s.time), s.team === 'ulm' ? 'VfB' : 'Gegner',
       s.line === '_' ? '' : lineLabel(s.line), s.team === 'ulm' && s.schuetze ? pl(s.schuetze) : '', ergLabel(s.erg),
       s.ev.blocker ? pl(s.ev.blocker) : '', g ? r1(g.seite) : '', g ? r1(g.tiefe) : '', g ? r1(g.dist) : '', g ? Math.round(g.winkel) : '',
-      g ? zoneLabel(g.zone) : s.geo && s.geo.ohneRichtung ? 'Richtung fehlt' : '', s.ort ? s.ort.x : '', s.ort ? s.ort.y : '']);
+      g ? zoneLabel(g.zone) : s.geo && s.geo.ohneRichtung ? 'Richtung fehlt' : '', s.ort ? s.ort.x : '', s.ort ? s.ort.y : '',
+      ...(arten ? [(s.arten || []).map(artLabel).join(', ')] : []), ...(paraden ? [s.parade ? paradeLabel(s.parade) : ''] : [])]);
   }
-  [11, 9, 13, 8, 16, 22, 11, 22, 8, 8, 11, 10, 15, 12, 12].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  [11, 9, 13, 8, 16, 22, 11, 22, 8, 8, 11, 10, 15, 12, 12, 34, 30].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
   ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: Math.max(2, ws.rowCount), column: heads.length } };
   return ws;
 }
