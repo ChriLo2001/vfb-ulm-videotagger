@@ -22,6 +22,7 @@ Es wird nichts installiert und nichts hochgeladen. Video und Daten bleiben auf d
 - [Setup vor dem Spiel](#setup-vor-dem-spiel)
 - [Durchgang 1: Spielgerüst](#durchgang-1-spielgerüst)
 - [Durchgang 2: Ballbesitzketten](#durchgang-2-ballbesitzketten)
+- [Schussort und Schusskarte (β)](#schussort-und-schusskarte-β)
 - [Tasten auf einen Blick](#tasten-auf-einen-blick)
 - [Auswertung](#auswertung)
 - [Szenen abspielen und Clips exportieren](#szenen-abspielen-und-clips-exportieren)
@@ -86,7 +87,8 @@ Oben rechts **„Standard“ / „Experiment“** (Standard ist voreingestellt, 
 
 Zurzeit experimentell: Erweiterte Kennzahlen, geschätzte Spielzeit (Drittellänge), automatische
 Tor-Pause, Szenen per Klick und Clip-Export, Stichprobe n, Kennzahlen im Excel, Ergebnis und Blocker
-bei Gegnerschüssen, lose Bälle, Ballsicherheit, Szenen markieren, Reaktionsausgleich. Neue Funktionen
+bei Gegnerschüssen, lose Bälle, Ballsicherheit, Szenen markieren, Reaktionsausgleich, Schussort mit
+Schusskarten, automatische Schuss- und Paradenarten. Neue Funktionen
 kommen immer zuerst in den Experimentmodus.
 
 ## Setup vor dem Spiel
@@ -101,6 +103,9 @@ kommen immer zuerst in den Experimentmodus.
 - **Reihen:** Spieler den Positionen zuordnen, pro Reihe einen Bullyspieler festlegen. Dazu die
   Sonderreihen Überzahl, Unterzahl und Spezial (z. B. ohne Torwart).
 - Kader und Reihen lassen sich als Vorlage speichern und im nächsten Spiel laden.
+- **Schussort** (β Experiment): „Schussort abfragen“ (aus / nur Tore / alle eigenen Schüsse /
+  alle Schüsse), Feldmaße (Vorgabe GF 40 × 20 m, KF 28 × 16 m; für kleinere Hallen anpassen) und
+  die Angriffsrichtung je Drittel. Stufe und Feldmaße werden mit der Vorlage gespeichert.
 
 ### Spielbericht aus dem Saisonmanager (optional)
 
@@ -163,6 +168,37 @@ Buttons. Du erfasst nur noch den Ball.
 Beispiel: Ballgewinn durch den linken Verteidiger, über Flügel und Top zum Schuss auf das Tor:
 `A` `1` `3` `5` `4` `E` `2`
 
+## Schussort und Schusskarte (β)
+
+Nur im Experimentmodus. Im Setup die Stufe „Schussort abfragen“ wählen.
+
+1. **Angriffsrichtung pro Drittel:** Beim Drittelbeginn (`D`) fragt der Besetzungsdialog, wohin
+   der VfB *in der Kamera* angreift (`←` `→`, Vorschlag: gewechselt gegenüber dem vorigen
+   Drittel). Korrigieren geht jederzeit im Setup, am Drittel-Ereignis (✎) oder direkt in der
+   Skizze – alle Schusskarten stimmen danach sofort.
+2. **Klick auf die Skizze:** Nach einem Schuss erscheint eine Feldskizze, so wie die Kamera das
+   Feld zeigt. Das Video springt auf den Schuss und steht. Klick auf den Ort, danach läuft das
+   Video an der alten Stelle weiter. `Esc` = Ort unbekannt. Solange die Skizze offen ist, wirken
+   die Erfassungstasten nicht (`←` `→` spulen).
+   - eigene Schüsse: in Durchgang 2 nach `E` und dem Ergebnis
+   - Gegnerschüsse: in Durchgang 1 nach `X` und dem Ergebnis (bei geblockt nach dem Blocker),
+     Gegentore nach `H`
+   - Tore aus Durchgang 1 (`J`) bekommen den Ort aus der Kette in Durchgang 2
+3. **Nachtragen:** `L` (beide Durchgänge) springt 3 s vor den nächsten Schuss ohne Ort, spielt bis
+   zum Schuss und öffnet die Skizze; Filter eigene / Gegner / alle, Anzeige „noch x von y offen“.
+   In der Ereignisliste öffnet ◌ bzw. ⌖ an jedem Schuss die Skizze zum Setzen oder Ändern.
+   `Strg+Z` macht einen gesetzten Ort rückgängig.
+
+In der Auswertung zeigt der Unterreiter **„Schusskarte β“** zwei Halbfelder: unsere Schüsse aufs
+gegnerische Tor und die Gegnerschüsse aufs eigene Tor, beide mit dem Tor oben. Tor = Stern,
+gehalten = Kreis, geblockt = Dreieck, vorbei = Kreuz. Filter: Reihe, Spieler, Drittel, Situation,
+Ergebnis. Klick auf einen Punkt spielt die Szene; einen Rahmen um mehrere Punkte ziehen spielt
+alle. Darunter: Schüsse je Zone (Slot, Halbdistanz, spitzer Winkel, Distanz, eigene Hälfte),
+**Schussarten** (Direktschuss, Abpraller, Konter, nach Bully, Fernschuss, Spielaufbau) und
+**Paradenarten** (gefangen, Abpraller gesichert, Abpraller beim Gegner, ins Aus) – beides
+automatisch aus den erfassten Daten, ohne zusätzliche Eingabe. Im Reihenvergleich und in der
+Spielertabelle kommen Slot-Anteil und Ø Schussdistanz dazu.
+
 ## Tasten auf einen Blick
 
 | Bereich | Tasten |
@@ -172,7 +208,7 @@ Beispiel: Ballgewinn durch den linken Verteidiger, über Flügel und Top zum Sch
 | Durchgang 1 (β) | nach `X`: `1` Tor · `2` gehalten · `3` geblockt (dann Blocker per Positionstaste, `0` anderer) · `4` vorbei · `Enter` unbekannt · `K` nächster Gegnerschuss ohne Ergebnis |
 | Durchgang 2 | `1`–`6` Spieler nach Position · `0` anderer Spieler · `A S D F G` Start · `Q W E R T` Ende · nach `E`: `1`–`4` Schussergebnis |
 | Immer | `O` Unterbrechung · `Strg+Z` rückgängig · `Esc` (oder Rücktaste) Kette verwerfen |
-| Immer (β) | `M` Szene markieren |
+| Immer (β) | `M` Szene markieren · `L` nächster Schuss ohne Ort |
 | Ein Bildschirm | `Z` Theatermodus an/aus |
 | Playlist (β) | `N` nächste Szene · `V` vorherige · `Esc` schließen |
 
@@ -249,7 +285,10 @@ Jede Playlist lässt sich exportieren:
 
 - **Excel:** Statistik-Blätter für Gesamtspiel und jedes Drittel im Stil der Vereinsvorlage,
   Passmatrix und alle Ereignisse; im Experimentmodus zusätzlich Kennzahlen-Blätter (Corsi,
-  Ballbesitz, Umschalten, Spielstand, Duos, Über-Unterzahl) und weitere Spalten (β)
+  Ballbesitz, Umschalten, Spielstand, Duos, Über-Unterzahl) und weitere Spalten (β); mit Schussort
+  zusätzlich das Blatt **„Schusskarten“** (Bilder je Reihe mit Zonentabelle, eine Reihe pro A4-Seite
+  quer) und das Blatt **„Schüsse“** (eine Zeile pro Schuss mit Ort in Metern, Distanz, Zone,
+  Schussart, Paradenart – zum Weiterauswerten)
 - **JSON:** komplette Rohdaten. Damit kann ein Spiel auf einem anderen Rechner weiterbearbeitet
   oder später neu ausgewertet werden.
 
@@ -285,6 +324,9 @@ Stand sonst weg.
   „aufs Tor %“ und kein Fenwick. Im Experimentmodus (β) lässt sich das Ergebnis erfassen und
   nachtragen; Quoten zählen nur Schüsse mit bekanntem Ergebnis.
 - Gleichzeitige Strafen (4 gegen 4) und angezeigte Strafen werden nicht gesondert erfasst.
+- Schussort (β): Klick in Kamerasicht ohne Perspektivkorrektur, an der fernen Bande daher nur
+  ungefähr. Der Direktschuss (≤ 1 s nach dem Ballkontakt) ist eine grobe Näherung aus zwei
+  Tastendrücken.
 - Getestet mit Google Chrome unter Windows.
 
 ## Lokal nutzen und weiterentwickeln

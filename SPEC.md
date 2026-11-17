@@ -123,6 +123,9 @@ Spezifikation hin (insbesondere Zwei-Fenster-Prinzip unter file://).
 | `loseBaelle` | Experiment | Spalten „Lose Bälle“ und „Rückeroberungen“ (Spielertabelle, Reihenvergleich absolut und /10), Excel-Zeilen und -Spalten |
 | `ballbilanz` | Experiment | Tabelle „Ballsicherheit β“ (Ballgewinne, lose Bälle, Fehlpässe, Ballverluste, Ballbilanz, Ballbilanz /10, Ballkontakte, Verluste je 10 Kontakte), Excel-Zeilen |
 | `markierungen` | Experiment | Taste M / Knopf „Markieren β“, Ereignistyp `markierung`, Filter in der Ereignisliste, Schnellauswahl „Markierte Szenen“ mit Playlist und Export; im Standard gespeichert, aber unsichtbar |
+| `schussort` | Experiment | Schussort per Feldskizze (Abfrage-Stufe und Feldmaße im Setup, Angriffsrichtung je Drittel, Nachtragen mit L, Ort in der Ereignisliste), Plausibilitätschecks, Unterreiter „Schusskarte β“ mit Zonentabelle, Spalten Slot-Anteil/Ø Distanz (Reihen) und Schüsse aus dem Slot/Ø Distanz (Spieler), Excel-Blätter „Schusskarten“ und „Schüsse“; im Standard gespeichert, aber weder abgefragt noch gezeigt |
+| `schussartAuto` | Experiment | Schussarten automatisch (Tabelle „Schussarten β“ in der Schusskarte, Excel-Spalte „Schussart“) |
+| `paradenAuto` | Experiment | Paradenarten automatisch (Tabelle „Paradenarten β“ in der Schusskarte, Spalten in der Tabelle „Torhüter β“, Excel-Spalte „Nach der Parade“) |
 
 Ebenfalls im Standard (harmlos, ohne Schalter): Bully-Warntext „kein
 Bullyspieler“; Ein-Bildschirm-Modus (unabhängig vom Betriebsmodus).
@@ -204,6 +207,13 @@ zweite ÜZ-/UZ-Reihe (ÜZ 2, UZ 2), Tempo bis 4×, Frame-Schritt.
   zwingend der Top). Zusätzlich Sonderreihen ÜZ, UZ und Spezial mit frei
   wählbarer Spielerzahl und eigener Formation.
 - Kader und Reihen als Vorlage speichern und für das nächste Spiel laden.
+- (Experiment, `schussort`) „Schussort abfragen“: aus / nur Tore und
+  Gegentore / alle eigenen Schüsse (+ Gegentore) / alle Schüsse; „Feld GF
+  (bzw. KF) (m)“ Länge × Breite; „Angriff VfB (Kamerasicht)“ je Drittel
+  (1, 2, 3, V). Stufe und Feldmaße werden pro Spiel gespeichert und mit
+  der Vorlage gespeichert/geladen (Vorlage ohne Angabe: aus bzw. Vorgabe);
+  „Neues Spiel“ übernimmt sie wie Kader und Reihen, die Richtung nicht.
+  Alte Spiele: aus.
 
 ### Spielbericht aus dem Saisonmanager (optional)
 - Feld für den Link (…/spiel/<ID>) oder die Spiel-ID aus saisonmanager.de.
@@ -257,6 +267,8 @@ Tasten in Durchgang 1:
   (4/5, bei befüllter zweiter Reihe auch 7/8).
 - M: (Experiment) Szene markieren – in beiden Durchgängen, ohne Dialog, das
   Video läuft weiter
+- L: (Experiment) nächster Schuss ohne Ort (Nachtragen, beide Durchgänge;
+  siehe „Schussort“)
 - D: Drittelbeginn / Drittelende
 - O: Spielunterbrechung Beginn / Ende (siehe „Spielunterbrechungen“;
   wirkt in beiden Durchgängen)
@@ -318,6 +330,72 @@ Mitte, sonst Bully aus der Ecke → erst dann läuft die Uhr weiter.
 - Markierungen zählen in keiner Statistik. Im Standardmodus bleiben sie
   gespeichert, werden aber weder in der Liste noch im Excel gezeigt, und M
   wirkt dort nicht.
+
+### Schussort (Experiment, `schussort`)
+**Feldskizze.** Draufsicht des Spielfelds in Kamerasicht: lange Seite
+waagerecht, die Seite nahe der Kamera unten; Bande mit runden Ecken,
+Mittellinie, Torräume, Schutzräume, Tore (Öffnung zur Mitte) und
+Bullypunkte (Kreuze). Maße als Konstanten `FELD` (Regeln Floorball
+Deutschland/IFF):
+
+| | GF | KF |
+|---|---|---|
+| Spielfeld (Vorgabe, pro Spiel änderbar) | 40 × 20 m | 28 × 16 m |
+| Torraum | 4 × 5 m, 2,85 m von der Querbande | 3 × 4,5 m, 2,35 m |
+| Torlinie (Pfosten) | 3,5 m von der Querbande | 3,0 m |
+| Schutzraum | 1 × 2,5 m vor der Torlinie | 1 × 2,5 m |
+| Tor | 1,60 m breit, 0,65 m tief | 1,60 m |
+| Bullypunkte | Mitte; Mittellinie und verlängerte Torlinien je 1,5 m von der langen Bande | ebenso |
+
+Die Skizze erscheint in der Erfassung oben in der Steuerspalte (anstelle
+der Feldanzeige), also auch im Ein-Bildschirm-Modus neben dem Video
+(1366 × 768: ca. 410 × 220 px; Zwei-Bildschirme: bis 640 px breit).
+
+**Angriffsrichtung.** `game.richtung = { '1': 'rechts' | 'links', '2', '3',
+'V' }` = Richtung, in die Ulm angreift, so wie die Kamera es zeigt. Abfrage
+beim Drittelbeginn (D) im Besetzungsdialog („Angriff VfB“, ← → wählt,
+Vorschlag: gewechselt gegenüber dem vorigen Drittel); änderbar im Setup,
+am Drittel-Ereignis (✎) und in der Skizze selbst. Die Richtung ist kein
+Ereignis (Strg+Z wirkt nicht darauf).
+
+**Abfrage.** Je nach Stufe im Setup:
+- eigene Schüsse: in Durchgang 2 nach E und dem Ergebnis (Stufe „nur
+  Tore“: nur bei Tor);
+- Gegnerschüsse: in Durchgang 1 nach X und dem Ergebnis bzw. nach dem
+  Blocker (Enter = Ergebnis unbekannt: nur Stufe „alle“); beim Nachtragen
+  der Ergebnisse (K) keine Skizze;
+- Gegentor H: immer ab Stufe „nur Tore“; gibt es einen Gegnerschuss ±3 s,
+  gehört der Ort zu diesem;
+- Tor Ulm J: kein Ort – er kommt aus der Kette in Durchgang 2; Tore ohne
+  Kette über die Ereignisliste nachtragbar. Penalty-Tore haben keinen Ort.
+- Die Skizze springt auf die Schusszeit (Standbild), nach dem Klick zurück
+  an die alte Stelle im alten Zustand (läuft/Pause, Tempo). Esc bzw.
+  Rücktaste = Ort unbekannt. Ziffern, Buchstaben, Leertaste und Tempo
+  wirken nicht, solange die Skizze offen ist; ← → und der Frame-Schritt
+  spulen; Strg+Z schließt die Skizze und macht die letzte Eingabe
+  rückgängig. Klicks auf Erfassungsknöpfe sind gesperrt.
+- Rückmeldung unter der Kopfzeile: Mini-Skizze und Text, z. B. „Slot, 6 m“
+  (ohne Richtung: „Richtung fehlt“).
+- Ereignisliste: Knopf ◌ (ohne Ort) bzw. ⌖ (mit Ort, Tooltip mit Zone und
+  Distanz) an jedem Schussversuch öffnet die Skizze mit dem bisherigen
+  Punkt; dort auch „Ort entfernen“. Jede Änderung ist ein Schritt für Strg+Z.
+
+**Nachtragen.** Taste L oder Knopf „Nächster Schuss ohne Ort β“ (Filter
+alle / eigene / Gegner, Anzeige „noch x von y offen“): springt 3 s vor den
+nächsten Schuss ohne Ort, spielt bis zum Schuss, öffnet die Skizze und
+geht nach dem Klick zum nächsten. Enter überspringt, Esc beendet.
+
+**Daten.** Gespeichert wird nur der rohe Klick in Kamerasicht, 0–100
+(x links → rechts, y oben → unten): eigener Schuss `ballbesitz.ort`,
+Gegnerschuss/Gegentor/Tor ohne Kette `ort`. Lage, Distanz, Winkel und Zone
+werden erst in der Auswertung berechnet (siehe Kennzahlen, Abschnitt 16);
+eine korrigierte Richtung wirkt deshalb sofort auf alle Karten.
+
+**Plausibilitätschecks.** Schüsse ohne Ort (je eigene/Gegner, Sprung zum
+ersten); Schüsse mit Ort, aber ohne Richtung; Schuss aus der eigenen
+Hälfte des Schützen → „Angriffsrichtung prüfen?“; ab 2 solchen Schüssen in
+einem Drittel, die mehr als die Hälfte der Schüsse mit Ort sind →
+„Angriffsrichtung vermutlich vertauscht“.
 
 ### Ergebnis von Gegnerschüssen (Experiment)
 Schalter `gegnerschussErgebnis`. Im Standardmodus verhält sich X wie
@@ -536,6 +614,22 @@ beginnt; die Eiszeit wird am Drittelende abgeschnitten.
     Reihenvergleich; Tabelle „Ballsicherheit β“ (Abschnitte 14 und 15 der
     Kennzahlen-Definitionen).
 11. (Experiment) Schnellauswahl „Markierte Szenen“ (siehe „Markierungen“).
+12. (Experiment, `schussort`) Unterreiter „Schusskarte β“: zwei Halbfelder
+    im gleichen Maßstab, links „Unsere Schüsse“ (aufs gegnerische Tor),
+    rechts „Gegnerschüsse“ (aufs eigene Tor), Tor oben, aus Sicht des
+    Schützen; Zonengrenzen gestrichelt. Filter: Drittel (oben), Reihe (wie
+    im Reihenvergleich), Spieler (eigene: Schütze; Gegner: auf dem Feld inkl.
+    Torwart), Situation, Ergebnis. Symbole: Tor = gefüllter Stern, gehalten
+    = Kreis, geblockt = Dreieck, vorbei = Kreuz, unbekannt = Raute, dazu
+    Farbe. Klick auf einen Punkt spielt die Szene, ein aufgezogener Rahmen
+    alle markierten als Playlist. Darunter „Schüsse je Zone β“ (eigene und
+    Gegner: Anzahl, Anteil, aufs Tor, Tore; Summe = alle Schüsse mit Ort).
+    Reihenvergleich: Slot-Anteil eigene/Gegner, Ø Distanz eigene/Gegner;
+    Spielertabelle: Schüsse aus dem Slot, Ø Schussdistanz (je mit n).
+13. (Experiment, `schussartAuto`) Tabelle „Schussarten β“ in der Schusskarte
+    (gefiltert wie die Karte, auch ohne Ort).
+14. (Experiment, `paradenAuto`) Tabelle „Paradenarten β“ in der Schusskarte
+    und Spalten je Paradenart in der Tabelle „Torhüter β“.
 
 ## Entscheidungen (geklärt nach Plan-Review)
 - Startart: file:// per Doppelklick.
@@ -660,6 +754,24 @@ auch Programme ohne Neuberechnung die Werte zeigen.
   Heidelberg-Mannheim Y–AM): Gegner aufs Tor, geblockt, vorbei, Ergebnis
   unbekannt (mit Summe), je /10′, Anteil aufs Tor und Blockquote (je mit n),
   FF, FA, FF % (mit n).
+
+### Schusskarten und Schüsse im Excel (Experiment, `schussort`)
+- Blatt „Schusskarten“: oben Legende und Zonen; je Block Überschrift
+  (Reihe, Eiszeit), zwei Bilder (Halbfeld eigene / Gegnerschüsse, PNG aus
+  derselben Zeichenfunktion wie am Bildschirm, Druckfarben, 3-fache
+  Auflösung) und darunter die Zonentabelle. Blöcke: Gesamt, jede normale
+  Reihe mit Eiszeit, Überzahl und Unterzahl zusammengefasst. A4 quer, auf
+  Seitenbreite skaliert, ein Seitenumbruch je Block.
+- Blatt „Schüsse“: eine Zeile pro Schussversuch (eigene inkl. Tore nur aus
+  Durchgang 1, Gegnerschüsse und Gegentore wie bei Corsi): Zeit, Sekunden,
+  Drittel, Team, Reihe auf dem Feld, Schütze, Ergebnis, Blocker, x und y in
+  Metern (x quer, + = rechts aus Sicht des Schützen; y = Abstand vor der
+  Torlinie, negativ = hinter dem Tor), Distanz, Winkel, Zone, Ort in
+  Kamerasicht; dazu „Schussart β“ und „Nach der Parade β“. Autofilter.
+- Statistik-Blätter: Kennzahlen-Zeilen „Schüsse aus dem Slot“ und „Ø
+  Schussdistanz (m)“; Reihenvergleich: Slot-Anteil eigene/Gegner (je mit n)
+  und Ø Distanz eigene/Gegner.
+- Hinweis „Experimentmodus …“ oben wie bei allen Blättern.
 
 ### Prüfung (20.10.2026)
 - Mit dem Spiel Heidelberg-Mannheim (nachgebaut aus dem Blatt
@@ -952,6 +1064,70 @@ Bildschirm und im Excel. n je Quote:
   Excel: Zeilen Ballbilanz, Ballbilanz /10′, Verluste je 10 Kontakte im
   Kennzahlen-Block.
 
+### 16. Schussort und Zonen (Experiment, `schussort`)
+- Umrechnung: Klick (x, y in %) → Meter (x·Länge, y·Breite). Greift das
+  schießende Team nach links an (Ulm laut `game.richtung`, der Gegner
+  umgekehrt), wird um 180° gedreht, damit links/rechts vom Tor stimmen.
+  Danach: tiefe = Abstand vor der Torlinie (negativ = hinter dem Tor),
+  seite = Abstand zur Mittelachse (+ = rechts aus Sicht des Schützen),
+  Distanz = Abstand zur Mitte der Torlinie, Winkel zur Mittelachse.
+- Zonen (Konstanten `ZONEN`, Prüfung in dieser Reihenfolge):
+  - Eigene Hälfte: Schuss von jenseits der Mittellinie (meist Hinweis auf
+    eine vertauschte Richtung).
+  - Distanz: über 12 m.
+  - Slot: höchstens 7 m und seitlich höchstens die halbe Torraumbreite
+    (GF 2,5 m, KF 2,25 m), vor der Torlinie.
+  - Spitzer Winkel: nicht Slot, bis 12 m, ab 50° zur Mittelachse (hinter
+    dem Tor immer).
+  - Halbdistanz: alles Übrige bis 12 m (auch seitlich nah, aber nicht spitz).
+- Gezählt werden nur Schüsse mit Ort und Richtung (= n). Reihe wie im
+  Reihenvergleich (eigene: Reihe beim Schuss; Gegner: Reihe des
+  Gegnerschusses bzw. beim Gegentor).
+
+### 17. Schussarten (Experiment, `schussartAuto`)
+Nur aus vorhandenen Daten, keine Eingabe; Zeitfenster in `KZ`, Zeiten ohne
+O-Unterbrechungen. Mehrfach möglich (z. B. Konter + Direktschuss).
+- Eigene Schüsse:
+  - Direktschuss: der Schütze hat einen Pass erhalten (mindestens zwei
+    Spieler in der Kette), Schuss ≤ 1,0 s nach seinem Ballkontakt. Grobe
+    Näherung: beruht auf zwei Tastendrücken mit Reaktionszeit.
+  - Abpraller / zweite Chance: ≤ 3 s nach einem vorigen eigenen Schuss,
+    der gehalten oder geblockt wurde.
+  - Konter: wie „eigener Konter“ (Start Ballgewinn per A oder loser Ball,
+    Schuss ≤ 10 s nach Kettenbeginn).
+  - Nach Bully: Kette mit Start Bully, Schuss ≤ 5 s nach Kettenbeginn.
+  - Fernschuss: Zone Distanz (nur mit Schussort).
+  - sonst „aus dem Spielaufbau“. Tore nur aus Durchgang 1 (ohne Kette):
+    nur Fernschuss ableitbar, sonst „nicht erfasst“.
+- Gegnerschüsse: Abpraller (≤ 3 s nach einem vorigen Gegnerschuss),
+  nach unserem Ballverlust (wie „Konter gegen uns“), Fernschuss, sonst
+  „aus dem Spielaufbau“.
+- Tabelle: Schussart × Anzahl, Anteil, aufs Tor, Tore, für uns und den
+  Gegner; die Zeilen addieren sich nicht zur Summe.
+
+### 18. Paradenarten (Experiment, `paradenAuto`)
+- Gehaltene Gegnerschüsse (unser Torwart): das erste passende Ereignis
+  ≤ 4 s danach (`KZ.PARADE_S`) entscheidet:
+  - eigene Kette mit Start Torwart → gefangen / kontrolliert, aber nur wenn
+    der Start bestätigt ist (`startVorauswahl` = false) oder der Torwart
+    erster Spieler der Kette ist; nur vorausgewählter Torwart-Start mit
+    Feldspieler als erstem Kontakt → „unbekannt (Torwart nur
+    vorausgewählt)“, getrennt gezählt;
+  - eigene Kette mit Start loser Ball oder Ballgewinn → Abpraller, von uns
+    gesichert;
+  - weiterer Gegnerschuss ohne eigene Kette dazwischen → Abpraller, Gegner
+    am Ball;
+  - Bully (Durchgang 1), Kette mit Start Bully/Freischlag oder Beginn
+    einer Unterbrechung → ins Aus / Unterbrechung;
+  - sonst unbekannt.
+- Nur wo Durchgang 2 erfasst ist: je Drittel von der ersten bis zur
+  letzten Kette; sonst „nicht erfasst“.
+- Unsere gehaltenen Schüsse (Gegnertorwart): nur „Abpraller, von uns
+  gesichert“ (eigene Kette mit Start loser Ball/Ballgewinn ≤ 4 s, vor
+  einem Gegnerschuss), sonst „sonst“.
+- Szenen per Klick: vom Schuss bis kurz nach dem Ereignis, das die Art
+  bestimmt hat.
+
 ### Prüfwerte Heidelberg-Mannheim (27.10.2026)
 - Faktoren 0,840 / 0,842 / 0,872 (erwartet ca. 0,84 / 0,84 / 0,87).
 - Schüsse/Gegnerschüsse R1 12/16, R2 17/5, R3 8/22, CF % 43/77/27 %
@@ -1008,6 +1184,37 @@ Bildschirm und im Excel. n je Quote:
 - Excel mit allen Testdaten: Standard 742, Experiment 862 Formeln ohne
   Fehler.
 
+### Prüfung Update B (17.11.2026)
+- Standard, Heidelberg-Mannheim: Excel Zelle für Zelle identisch mit dem
+  Stand vor Update B (alle Blätter); keine Abfrage, keine neuen Spalten,
+  Blätter oder Knöpfe; Moduswechsel ändert das JSON nicht.
+- Experiment: alle bisherigen Zeilen und Werte unverändert (nur 2 neue
+  Spielerzeilen, 6 neue Spalten im Reihenvergleich, Blätter „Schusskarten“
+  und „Schüsse“); Prüfwerte vom 27.10. damit unverändert.
+- Erfassung (Testvideo, Ein-Bildschirm-Modus): X → 2 → Skizze mit
+  Standbild beim Schuss, Erfassungstasten wirkungslos, nach dem Klick
+  zurück und weiter abgespielt; E → 1 in Durchgang 2; Esc; H; Strg+Z nimmt
+  den Ort zurück; L spielt bis zum Schuss und öffnet die Skizze; Richtung
+  beim Drittelbeginn (Vorschlag gewechselt).
+- Umrechnung: derselbe reale Punkt im 1. Drittel (Angriff rechts) und im
+  2. Drittel (links) ergibt exakt dieselbe Lage; Richtung des 1. Drittels
+  nachträglich ändern spiegelt alle Punkte dieses Drittels.
+- Summen (Testkopie mit Orten): Punkte auf den Karten = Schüsse mit Ort
+  (38 eigene + 42 Gegner); Zonentabelle summiert sich zu allen Schüssen
+  mit Ort; Filter Reihe = Reihenvergleich (eigene und Gegner je Reihe).
+- Excel: öffnet ohne Fehler, 12 Bilder (6 Blöcke), Blatt „Schüsse“ mit 88
+  Schüssen.
+- Paradenarten an eingefügten Testszenen: alle sieben Arten richtig.
+  Heidelberg-Mannheim: 9 Torwart-Starts, alle bestätigt (0 nur
+  vorausgewählt); Gegnerschüsse ohne Ergebnis, daher dort keine
+  Paradenarten für unseren Torwart; unsere 16 gehaltenen Schüsse:
+  4 Abpraller gesichert.
+- Schussarten Heidelberg-Mannheim: eigene 2 Direktschüsse, 19 Konter,
+  16 Spielaufbau, 0 Abpraller, 0 nach Bully; Gegner 15 nach unserem
+  Ballverlust, 3 Abpraller, 26 Spielaufbau. Nur 2 eigene Schüsse liegen
+  ≤ 1,0 s nach dem Ballkontakt des Schützen (≤ 1,5 s: 9) – Fenster nach
+  der Videokontrolle ggf. anpassen.
+
 ## Bekannte Grenzen
 - Gleichzeitige Strafen (4 gegen 4) und angezeigte Strafen werden nicht
   gesondert erfasst; maßgeblich ist die gesetzte Reihe (ÜZ/UZ/1–3).
@@ -1018,19 +1225,33 @@ Bildschirm und im Excel. n je Quote:
   und kein „aufs Tor %“ für den Gegner). Im Experimentmodus erfassbar
   (inkl. Nachtragen); Quoten zählen nur Schüsse mit bekanntem Ergebnis, FA
   enthält auch unbekannte.
+- Schussort: Klick in Kamerasicht ohne Perspektivkorrektur – bei einer
+  seitlich hohen Kamera sind Tiefe und Distanz an der fernen Bande nur
+  ungefähr. Ohne Angriffsrichtung keine Lage und keine Zone.
+- Schussarten: Direktschuss ist eine grobe Näherung (zwei Tastendrücke).
+  „Konter“ übernimmt die bestehende Definition: auch ein loser Ball nach
+  einem eigenen Schuss im Angriffsdrittel zählt als Konter (fällt der neue
+  Schuss ≤ 3 s nach dem vorigen, zusätzlich als Abpraller).
 
 ## Datenmodell (Vorschlag)
 - game: { id, datum, gegner, modus, video: { name, size, duration },
-  kader[], reihen[], bericht? }
+  kader[], reihen[], bericht?, richtung?, schussortAbfrage?, feld? }
+  - richtung (Experiment): { '1' | '2' | '3' | 'V': 'rechts' | 'links' } –
+    Angriffsrichtung von Ulm in Kamerasicht je Drittel
+  - schussortAbfrage (Experiment): 'tore' | 'eigene' | 'alle' (fehlt = aus)
+  - feld (Experiment): { GF?: { laenge?, breite? }, KF?: … } – nur
+    Abweichungen von der Vorgabe
   - bericht (Saisonmanager): { spielId, heimTeam, gastTeam, unser, datum,
     ergebnis, tore: [{ periode, zeit, team, schuetze, vorlage, stand }],
     strafen: [{ periode, zeit, team, nummer, art, grund }], timeouts[] }
 - events[]: jedes Ereignis mit { id, typ, time, ...typabhängige Felder }
   - wechsel: { reihe, spieler[] } bzw. einzelwechsel: { raus, rein }
   - gegnerschuss: { reiheAufFeld, ergebnis?: gehalten | geblockt | vorbei,
-    blocker?: spielerId } (Ergebnis/Blocker optional, Experiment)
-  - tor / gegentor: { aufDemFeld[], schuetze?, vorlage? } (Schütze/Vorlage
-    bei Ulmer Toren, vorgeschlagen aus dem Spielbericht)
+    blocker?: spielerId, ort?: { x, y } } (Ergebnis/Blocker/Ort optional,
+    Experiment)
+  - tor / gegentor: { aufDemFeld[], schuetze?, vorlage?, ort? } (Schütze/
+    Vorlage bei Ulmer Toren, vorgeschlagen aus dem Spielbericht; ort nur
+    bei Gegentoren ohne Gegnerschuss ±3 s bzw. Toren ohne Kette)
   - bully: { spieler, gewonnen }
   - strafe: { team, spieler, dauer }
   - penalty: { team: ulm | gegner, schuetze?, torwart?, ergebnis: tor |
@@ -1045,7 +1266,9 @@ Bildschirm und im Excel. n je Quote:
     bully, ohneTorwart } } } – Besetzung ab Drittelbeginn
   - ballbesitz: { start (ballgewinn | bully | freischlag | torwart |
     loserBall | unbekannt), startVorauswahl, kette: [{ spieler, time }],
-    ende, schussErgebnis?, tStart, tEnde }
+    ende, schussErgebnis?, tStart, tEnde, ort?: { x, y } }
+  - ort (Experiment): Klick in Kamerasicht, 0–100 (x links → rechts,
+    y oben → unten); Lage, Distanz, Zone werden nur berechnet
 - Auf-dem-Feld-Stand zu Zeit t wird immer aus allen Wechselereignissen
   ≤ t berechnet (nicht als Zustand gespeichert), damit Zurückspulen und
   nachträgliche Korrekturen konsistent bleiben.
@@ -1064,17 +1287,17 @@ umgesetzt):
   Zustellen), als optionale Angabe zur Kette.
 - Passblock/Abwehraktion ohne Ballkontrolle als eigene Defensivaktion pro
   Spieler (z. B. Pass abgefälscht, ohne dass ein eigener Ballbesitz folgt).
-- Schusskategorien: automatisch ableitbar (direkt nach Pass ≤ 1 s,
-  Abpraller ≤ 3 s nach eigenem Schuss, Konter) plus manuelle Tags
-  (Alleingang, Fernschuss, verdeckt/abgelenkt).
-- Paraden-Kategorien (gefangen, ins Aus, Abpraller), möglichst automatisch
-  aus dem nächsten Kettenstart in Durchgang 2 abgeleitet.
-- Schuss- und Szenenort per Klick auf eine Feldskizze in Kamerasicht, mit
-  Angriffsrichtung pro Drittel.
+- Manuelle Schuss-Tags (Alleingang, verdeckt/abgelenkt) zusätzlich zu den
+  automatischen Schussarten.
 - Zusatzabfragen pro Spiel einzeln abschaltbar; im Spiel speichern, welche
-  aktiv waren, damit „nicht erfasst“ als „–“ statt 0 erscheint.
+  aktiv waren, damit „nicht erfasst“ als „–“ statt 0 erscheint (für den
+  Schussort umgesetzt: Abfrage-Stufe pro Spiel).
+
+Erledigt mit Update B (17.11.2026, Experiment): Schussort per Feldskizze
+mit Angriffsrichtung pro Drittel, Schusskarten, automatische Schuss- und
+Paradenarten.
 
 Weitere Ideen:
-- Zonen per Klick auf eine Spielfeldskizze
+- Szenenort (z. B. Ballverlust, Ballgewinn) per Klick auf die Feldskizze
 - Vergleich mehrerer Spiele / Saisonwerte
 - Tastenbelegung im Tool anpassbar
