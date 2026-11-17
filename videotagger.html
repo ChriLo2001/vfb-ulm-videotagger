@@ -1727,8 +1727,8 @@ const SCHUSSARTEN = [
   { code: 'direkt', label: 'Direktschuss', teams: ['ulm'],
     title: `Schütze hat einen Pass erhalten, Schuss ≤ ${KZ.DIREKT_S} s nach seinem Ballkontakt (grobe Näherung: zwei Tastendrücke mit Reaktionszeit)` },
   { code: 'abpraller', label: 'Abpraller / zweite Chance', teams: ['ulm', 'gegner'],
-    title: `≤ ${KZ.ABPRALLER_S} s nach einem vorigen Schuss desselben Teams (eigene: nur nach gehalten oder geblockt)` },
-  { code: 'konter', label: 'Konter', teams: ['ulm'], title: `Kette mit Start Ballgewinn (Taste A) oder loser Ball, Schuss ≤ ${KZ.EIGENER_KONTER_S} s nach Kettenbeginn` },
+    title: `≤ ${KZ.ABPRALLER_S} s nach einem vorigen Schuss desselben Teams (eigene: Schuss nach gehalten/geblockt oder Kette beginnt nach gehalten/geblockt/vorbei)` },
+  { code: 'konter', label: 'Konter', teams: ['ulm'], title: `Kette mit Start Ballgewinn (Taste A) oder loser Ball, Schuss ≤ ${KZ.EIGENER_KONTER_S} s nach Kettenbeginn; nicht, wenn die Kette ≤ ${KZ.ABPRALLER_S} s nach einem eigenen Schuss beginnt (zweite Chance)` },
   { code: 'nachVerlust', label: 'nach unserem Ballverlust', teams: ['gegner'],
     title: `Konter gegen uns: ≤ ${KZ.KONTER_S} s nach eigenem Fehlpass/Ballverlust, ohne eigene Kette dazwischen` },
   { code: 'nachBully', label: 'nach Bully', teams: ['ulm'], title: `Kette mit Start Bully, Schuss ≤ ${KZ.NACH_BULLY_S} s nach Kettenbeginn` },
@@ -1769,8 +1769,9 @@ function annotateShots(list) {
       if (s.x.nurD1) { s.arten = fern(s) ? ['fern'] : ['nichtErfasst']; continue; }
       const c = s.ev, k = c.kette, a = [];
       if (k.length >= 2 && nd(k[k.length - 1].time, s.time) <= KZ.DIREKT_S) a.push('direkt');
-      if (own.some(p => p.time < s.time - 1e-9 && (p.erg === 'gehalten' || p.erg === 'geblockt') && nd(p.time, s.time) <= KZ.ABPRALLER_S)) a.push('abpraller');
-      if (istRueckeroberung(c) && nd(c.tStart, s.time) <= KZ.EIGENER_KONTER_S) a.push('konter');
+      const zweite = istZweiteChance(c, oiv);
+      if (zweite || own.some(p => p.time < s.time - 1e-9 && (p.erg === 'gehalten' || p.erg === 'geblockt') && nd(p.time, s.time) <= KZ.ABPRALLER_S)) a.push('abpraller');
+      if (istRueckeroberung(c) && !zweite && nd(c.tStart, s.time) <= KZ.EIGENER_KONTER_S) a.push('konter');
       if (c.start === 'bully' && nd(c.tStart, s.time) <= KZ.NACH_BULLY_S) a.push('nachBully');
       if (fern(s)) a.push('fern');
       s.arten = a.length ? a : ['aufbau'];
@@ -5374,6 +5375,13 @@ const LOSS_ENDS = ['fehlpass', 'ballverlust'];
 // Umschalten: Konter gegen uns, eigene Konter, Gegenpressing
 // Rückeroberung = Kettenstart Ballgewinn (Taste A, nicht nur vorausgewählt) oder loser Ball
 const istRueckeroberung = c => c.start === 'loserBall' || (c.start === 'ballgewinn' && !c.startVorauswahl);
+// Zweite Chance: eigene Kette, die ≤ KZ.ABPRALLER_S nach einem eigenen Schuss (gehalten/geblockt/vorbei) beginnt.
+// Zählt als Abpraller / zweite Chance, nicht als eigener Konter (Festlegung 17.11.2026).
+const ZWEITE_CHANCE_ERG = ['gehalten', 'geblockt', 'vorbei'];
+function istZweiteChance(c, oiv) {
+  return events.some(e => e.typ === 'ballbesitz' && e !== c && e.ende === 'schuss' && ZWEITE_CHANCE_ERG.includes(e.schussErgebnis) &&
+    (e.tEnde ?? e.time) <= c.tStart + 1e-9 && netDist(e.tEnde ?? e.time, c.tStart, oiv) <= KZ.ABPRALLER_S);
+}
 
 function computeUmschalten(range, oiv, shotsF, shotsA) {
   const inRange = t => !range || (t >= range.t0 && t <= range.t1);
@@ -5423,7 +5431,7 @@ function computeUmschalten(range, oiv, shotsF, shotsA) {
   for (const c of chains) {
     if (!inRange(c.tStart)) continue;
     const line = lineAt(c.kette[0].time) || '_';
-    const ist = c.ende === 'schuss' && netDist(c.tStart, c.tEnde, oiv) <= KZ.EIGENER_KONTER_S;
+    const ist = c.ende === 'schuss' && netDist(c.tStart, c.tEnde, oiv) <= KZ.EIGENER_KONTER_S && !istZweiteChance(c, oiv);
     if (c.start === 'torwart') {
       team.twStarts++;
       bump(eigenTWL, line, o => { o.ok++; if (ist) { o.n++; o.ereignisse.push({ c }); } });
@@ -6436,7 +6444,8 @@ function renderKzUmschalten(st, out) {
   return h('div', null,
     h('p', { class: 'hint' }, `Konter gegen uns: Gegnerschuss oder Gegentor ≤ ${KZ.KONTER_S} s nach dem Ende einer eigenen Kette mit Fehlpass ` +
       `oder Ballverlust, ohne eigene Kette dazwischen (Reihe beim Verlust, Spieler = wer den Ball verloren hat). Eigene Konter: Start ` +
-      `Ballgewinn (Taste A) oder loser Ball, Schuss ≤ ${KZ.EIGENER_KONTER_S} s nach Kettenbeginn; Start Torwart getrennt. ` +
+      `Ballgewinn (Taste A) oder loser Ball, Schuss ≤ ${KZ.EIGENER_KONTER_S} s nach Kettenbeginn, aber nicht, wenn die Kette ≤ ${KZ.ABPRALLER_S} s nach ` +
+      `einem eigenen Schuss beginnt (zweite Chance); Start Torwart getrennt. ` +
       `Gegenpressing: Rückeroberung nur mit Start Ballgewinn oder loser Ball. Zeiten netto ohne O-Unterbrechungen.`),
     h('div', { class: 'tableWrap' }, statsTable(cols, lineRowsU, { total, clip })),
     h('h3', { style: 'margin-top:14px' }, 'Spieler'),
@@ -7549,7 +7558,8 @@ const KZ_SHEETS = [
     `Phase = Ketten, die nach Fehlpass/Ballverlust ≤ ${KZ.PHASE_LUECKE_S} s später weitergehen. Ballbesitz = Videozeit. ` + BB_HINWEIS],
   ['Umschalten', renderKzUmschalten,
     `Konter gegen uns: Gegnerschuss/Gegentor ≤ ${KZ.KONTER_S} s nach eigenem Fehlpass/Ballverlust. Gegenpressing: eigene Kette mit Start ` +
-    `Ballgewinn oder loser Ball ≤ ${KZ.GEGENPRESSING_S} s danach. Konter nach Torwart-Start getrennt ausgewiesen.`],
+    `Ballgewinn oder loser Ball ≤ ${KZ.GEGENPRESSING_S} s danach. Eigene Konter ohne zweite Chancen (Kette beginnt ≤ ${KZ.ABPRALLER_S} s ` +
+    `nach eigenem Schuss). Konter nach Torwart-Start getrennt ausgewiesen.`],
   ['Spielstand', renderKzSpielstand, 'Spielstand aus Ulmer Sicht; ein Tor zählt noch zum Spielstand davor. ' + BB_HINWEIS],
   ['Duos', renderKzDuos, `Feldspielerpaare mit ≥ ${KZ.DUO_MIN_S / 60} min gemeinsamer geschätzter Spielzeit (5 gegen 5).`],
   ['Über-Unterzahl', renderKzUeberzahl, 'Überzahlquote = ÜZ-Tore ÷ Überzahlen · Unterzahl überstanden = 1 − UZ-Gegentore ÷ Unterzahlen. ' + BB_HINWEIS],

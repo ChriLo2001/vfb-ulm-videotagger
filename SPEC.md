@@ -894,7 +894,7 @@ auf dem Feld). Hauptwert in der Spielertabelle: 5 gegen 5.
   (Anzahl, und davon Gegentore). Gegentore zusätzlich mit Fenster 20 s.
 - Eigene Konter: Kette mit Start „Ballgewinn“ oder „loser Ball“, die
   innerhalb von 10 s nach tStart mit einem Schuss endet. Pro Reihe und pro
-  Ballgewinner/Schütze.
+  Ballgewinner/Schütze. Ausgenommen sind zweite Chancen (siehe unten).
 - Gegenpressing-Erfolg: Anteil der eigenen Fehlpässe/Ballverluste, nach
   denen innerhalb von 5 s wieder eine eigene Kette beginnt (ohne
   Gegnerschuss dazwischen). Pro Reihe.
@@ -910,6 +910,15 @@ auf dem Feld). Hauptwert in der Spielertabelle: 5 gegen 5.
   „Torwart“ (auch vorausgewählt nach Gegnerschuss) werden zusätzlich
   gezählt, aber in eigenen Spalten: „Starts Torwart“, „Konter nach
   Torwart-Start“ (Reihe) und „Konter nach Torwart-Start als Schütze“
+- Festlegung (17.11.2026): Eine eigene Kette, die ≤ 3 s (`KZ.ABPRALLER_S`,
+  netto) nach einem eigenen Schuss mit Ergebnis gehalten, geblockt oder
+  vorbei beginnt, ist eine **zweite Chance** (Abpraller) und kein eigener
+  Konter. Grund: der lose Ball nach dem eigenen Schuss ist meist ein
+  Abpraller im Angriffsdrittel, kein Umschalten aus der Verteidigung – die
+  Kennzahl „eigene Konter“ war dadurch zu hoch (Heidelberg-Mannheim: 5 von
+  19). Gilt für die Spalten „eigene Konter“, „als Ballgewinner“, „als
+  Schütze“ und für die Schussart „Konter“; „Ballgewinne + lose Bälle“ und
+  Gegenpressing bleiben unverändert. Nur Experimentmodus.
   (Spieler); die bisherigen Spalten enthalten sie nicht.
 
 ### 4. Schichtverlauf (Ermüdung)
@@ -1091,10 +1100,11 @@ O-Unterbrechungen. Mehrfach möglich (z. B. Konter + Direktschuss).
   - Direktschuss: der Schütze hat einen Pass erhalten (mindestens zwei
     Spieler in der Kette), Schuss ≤ 1,0 s nach seinem Ballkontakt. Grobe
     Näherung: beruht auf zwei Tastendrücken mit Reaktionszeit.
-  - Abpraller / zweite Chance: ≤ 3 s nach einem vorigen eigenen Schuss,
-    der gehalten oder geblockt wurde.
+  - Abpraller / zweite Chance: Schuss ≤ 3 s nach einem vorigen eigenen
+    Schuss, der gehalten oder geblockt wurde, oder die Kette beginnt ≤ 3 s
+    nach einem eigenen Schuss (gehalten, geblockt oder vorbei).
   - Konter: wie „eigener Konter“ (Start Ballgewinn per A oder loser Ball,
-    Schuss ≤ 10 s nach Kettenbeginn).
+    Schuss ≤ 10 s nach Kettenbeginn, keine zweite Chance).
   - Nach Bully: Kette mit Start Bully, Schuss ≤ 5 s nach Kettenbeginn.
   - Fernschuss: Zone Distanz (nur mit Schussort).
   - sonst „aus dem Spielaufbau“. Tore nur aus Durchgang 1 (ohne Kette):
@@ -1212,8 +1222,24 @@ O-Unterbrechungen. Mehrfach möglich (z. B. Konter + Direktschuss).
 - Schussarten Heidelberg-Mannheim: eigene 2 Direktschüsse, 19 Konter,
   16 Spielaufbau, 0 Abpraller, 0 nach Bully; Gegner 15 nach unserem
   Ballverlust, 3 Abpraller, 26 Spielaufbau. Nur 2 eigene Schüsse liegen
-  ≤ 1,0 s nach dem Ballkontakt des Schützen (≤ 1,5 s: 9) – Fenster nach
-  der Videokontrolle ggf. anpassen.
+  ≤ 1,0 s nach dem Ballkontakt des Schützen (≤ 1,5 s: 9). Entscheidung
+  (17.11.2026): `KZ.DIREKT_S` bleibt bei 1,0 s. (Konter/Abpraller seit
+  17.11.2026 geändert, siehe unten.)
+
+### Prüfung Konter vs. zweite Chance (17.11.2026)
+- Standard: Excel Heidelberg-Mannheim Zelle für Zelle identisch mit dem
+  Stand vor der Änderung.
+- Experiment: Unterschiede nur in den Blättern „Umschalten“ und „Schüsse“.
+- Neue Prüfwerte Heidelberg-Mannheim: eigene Konter 14 (vorher 19), je
+  Reihe R1 5 (7), R2 5 (8), R3 4 (4); Ballgewinne + lose Bälle 119
+  (unverändert). Starts Torwart 9, davon 0 Konter (unverändert).
+- Schussarten (ohne Schussorte, also ohne Fernschuss): eigene 2
+  Direktschüsse, 14 Konter (vorher 19), 11 Abpraller / zweite Chance
+  (vorher 0), 15 Spielaufbau (vorher 21); Gegner unverändert (15 nach
+  Ballverlust, 3 Abpraller, 31 Spielaufbau).
+- 16 Ketten beginnen ≤ 3 s nach einem eigenen Schuss; 11 davon enden mit
+  einem Schuss, 5 davon lagen bisher im 10-s-Konterfenster (20:40, 20:43,
+  33:44, 1:00:19, 1:04:39 Kettenbeginn).
 
 ## Bekannte Grenzen
 - Gleichzeitige Strafen (4 gegen 4) und angezeigte Strafen werden nicht
@@ -1229,9 +1255,9 @@ O-Unterbrechungen. Mehrfach möglich (z. B. Konter + Direktschuss).
   seitlich hohen Kamera sind Tiefe und Distanz an der fernen Bande nur
   ungefähr. Ohne Angriffsrichtung keine Lage und keine Zone.
 - Schussarten: Direktschuss ist eine grobe Näherung (zwei Tastendrücke).
-  „Konter“ übernimmt die bestehende Definition: auch ein loser Ball nach
-  einem eigenen Schuss im Angriffsdrittel zählt als Konter (fällt der neue
-  Schuss ≤ 3 s nach dem vorigen, zusätzlich als Abpraller).
+  Zweite Chance nur über das 3-s-Fenster nach dem eigenen Schuss: ein
+  loser Ball, der später als 3 s nach dem Schuss gesichert wird, kann
+  weiterhin als Konter zählen.
 
 ## Datenmodell (Vorschlag)
 - game: { id, datum, gegner, modus, video: { name, size, duration },

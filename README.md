@@ -256,7 +256,7 @@ Alle Werte gibt es für das Gesamtspiel und für jedes Drittel einzeln.
 | Spielzeit (geschätzt) | Videozeit pro Drittel auf die echte Drittellänge umgerechnet, weil bei Ball im Aus die Uhr steht. Alle Werte „pro 10 min“ beziehen sich darauf. |
 | Corsi (CF, CA, CF %) | Schussversuche für und gegen, während ein Spieler oder eine Reihe auf dem Feld steht. Dazu CF % relativ zum Team. |
 | Ballbesitz | Ballbesitzzeit, Anteil an der Netto-Videozeit, Phasendauer, längste Phase |
-| Umschalten | Konter gegen uns nach eigenem Ballverlust, eigene Konter, Gegenpressing-Erfolg |
+| Umschalten | Konter gegen uns nach eigenem Ballverlust, eigene Konter (ohne zweite Chancen: Kette beginnt ≤ 3 s nach eigenem Schuss), Gegenpressing-Erfolg |
 | Schichtverlauf | Schüsse für und gegen nach Schichtdauer (0–45 s, 45–90 s, über 90 s) |
 | Bully-Wert | Was in den 10 Sekunden nach einem Bully passiert |
 | Spielstand | Werte bei Führung, Gleichstand, Rückstand |
